@@ -11,8 +11,34 @@ solde d'un client ou s'attribuer des points qu'il n'a pas le droit d'émettre.
 
 ---
 
+## 🚀 Démarrage rapide
+
+```bash
+# 1. Environnement virtuel + dépendances
+python3 -m venv .venv
+source .venv/bin/activate          # Windows : .venv\Scripts\activate
+pip install -r requirements.txt
+
+# 2. Lancer un nœud (API REST)
+python main.py --port 5000
+# → l'index auto-documenté des routes : curl http://127.0.0.1:5000/
+
+# 3. (Optionnel) lancer la démonstration complète à 3 nœuds
+python scripts/demo.py
+
+# 4. Lancer les tests
+pytest -q
+```
+
+> Le projet est une **API REST en Python pur** : aucune base de données, aucune
+> compilation. La cryptographie (ECDSA / SECP256k1) est réelle, via `ecdsa`.
+> *(Ce dépôt couvre le **backend / l'API** ; un client web le consomme séparément.)*
+
+---
+
 ## Sommaire
 
+- [Démarrage rapide](#-démarrage-rapide)
 - [Principe général](#principe-général)
 - [Concepts clés](#concepts-clés)
 - [Le consensus Proof of Authority](#le-consensus-proof-of-authority)
@@ -23,6 +49,12 @@ solde d'un client ou s'attribuer des points qu'il n'a pas le droit d'émettre.
 - [Architecture on-chain / off-chain](#architecture-on-chain--off-chain)
 - [Garanties de sécurité](#garanties-de-sécurité)
 - [Glossaire](#glossaire)
+- [Structure du projet](#structure-du-projet)
+- [API REST](#api-rest)
+- [Démonstration des exigences du sujet](#démonstration-des-exigences-du-sujet)
+- [Choix techniques](#choix-techniques)
+- [Difficultés rencontrées](#difficultés-rencontrées)
+- [Limitations connues](#limitations-connues)
 
 ---
 
@@ -230,3 +262,227 @@ mettre en conformité, par ex. droit à l'effacement).
 - **On-chain / Off-chain** — Données stockées sur la blockchain / dans une base externe.
 - **Adresse pseudonyme** — Clé publique identifiant un compte sur la chaîne, sans révéler
   l'identité réelle.
+
+---
+
+## Structure du projet
+
+```
+YLIA_blockchain/
+├── main.py                 # point d'entrée d'un nœud (CLI : --port, --node-key, --new-key)
+├── requirements.txt        # dépendances (Flask, ecdsa, requests, pytest)
+├── README.md
+├── src/ylia/
+│   ├── crypto.py           # cryptographie réelle : clés, signatures ECDSA, adresses
+│   ├── transaction.py      # transaction signée (credit / debit / register / revoke)
+│   ├── block.py            # bloc : hash SHA-256 déterministe + champ de consensus
+│   ├── registry.py         # registre d'agréments (liste blanche des autorités PoA)
+│   ├── blockchain.py       # chaîne, minage, validation, soldes, résolution de conflits
+│   ├── node.py             # communication réseau entre nœuds (pairs, diffusion)
+│   ├── config.py           # racine, genesis, ports
+│   └── api/                # couche HTTP (séparée du cœur, donc testable)
+│       ├── __init__.py     #   factory create_app()
+│       ├── routes.py       #   Blueprint : toutes les routes
+│       └── errors.py       #   gestion d'erreurs JSON cohérente
+├── scripts/
+│   ├── demo.py             # démonstration automatisée à 3 nœuds (les 5 points du sujet)
+│   └── run_two_nodes.sh    # lance 2 nœuds pour des essais manuels
+└── tests/                  # 56 tests pytest (cœur, consensus, réorg, réseau, API)
+```
+
+La **séparation cœur / transport** est volontaire : le domaine (`blockchain.py`,
+`crypto.py`, …) ne dépend pas de Flask et se teste sans serveur ; la couche `api/`
+ne fait que traduire HTTP ↔ domaine. La factory `create_app(blockchain=…)` permet
+à chaque test de partir d'une blockchain neuve.
+
+### Structure d'un bloc (exigence du sujet)
+
+| Champ | Rôle |
+|---|---|
+| `index` | position dans la chaîne (0 = genesis) |
+| `timestamp` | horodatage de production |
+| `transactions` | liste des transactions incluses |
+| `previous_hash` | hash du bloc précédent (chaînage) |
+| `hash` | **SHA-256 déterministe** du bloc (JSON trié) |
+| `validator`, `validator_pubkey`, `signature` | **champ de consensus PoA** : l'autorité qui a produit le bloc et sa signature |
+
+---
+
+## API REST
+
+### Endpoints exigés par le sujet
+
+| Méthode | Route | Description |
+|---|---|---|
+| `GET`  | `/chain` | la chaîne complète + sa longueur |
+| `POST` | `/transactions/new` | soumettre une transaction signée |
+| `GET`  | `/mine` | miner un bloc contenant les transactions en attente |
+
+### Réseau multi-nœuds
+
+| Méthode | Route | Description |
+|---|---|---|
+| `POST` | `/nodes/register` | enregistrer des pairs (`{"nodes": ["http://…:5001"]}`) |
+| `GET`  | `/nodes` | lister les pairs |
+| `GET`  | `/nodes/resolve` | **résolution de conflits** (plus longue chaîne valide) |
+
+### Spécifique YLIA (points de fidélité / PoA)
+
+| Méthode | Route | Description |
+|---|---|---|
+| `GET`  | `/authorities` | liste blanche des autorités agréées |
+| `POST` | `/authorities/register` | agréer un établissement (`{"address": "YLIA…"}`) |
+| `POST` | `/authorities/revoke` | révoquer un établissement |
+| `GET`  | `/balance/<address>` | solde d'un compte |
+| `GET`  | `/balances` | tous les soldes |
+| `GET`    | `/pending` | transactions en attente |
+| `DELETE` | `/transactions/pending` | vider le mempool (exploitation) |
+| `GET`    | `/validate` | la chaîne est-elle valide ? (+ raison si non) |
+| `GET`    | `/wallet/new` | générer une paire de clés |
+| `GET`    | `/node` | informations sur le nœud courant |
+
+### Utilitaires
+
+| Méthode | Route | Description |
+|---|---|---|
+| `GET` | `/` | index auto-documenté (catalogue des routes + état du nœud) |
+| `GET` | `/health` | sonde de vivacité |
+
+Toutes les erreurs sont renvoyées en JSON : `{"error": "<message>"}` avec le bon
+code HTTP (400 validation, 403 nœud non agréé au minage, 404, 405, 500).
+
+### Format d'une transaction
+
+Les champs du sujet (`sender`, `recipient`, `amount`) sont présents et complétés
+par le modèle métier YLIA :
+
+```jsonc
+{
+  "type": "credit",            // credit | debit | register | revoke
+  "sender": "YLIA…",           // adresse de l'émetteur (autorité signataire)
+  "recipient": "YLIA…",        // client (credit/debit) ou établissement (register/revoke)
+  "amount": 50,                 // points (0 pour register/revoke)
+  "public_key": "…",           // clé publique de l'émetteur
+  "timestamp": 1718000000.0,
+  "nonce": "facture-42",        // optionnel : identifiant d'opération (idempotence)
+  "signature": "…"             // signature ECDSA de tout ce qui précède
+}
+```
+
+Pour faciliter les essais, `POST /transactions/new` accepte aussi `{"private_key": "…"}`
+(signature côté serveur) ou `{"use_root": true}` (signé par la racine). En production,
+la signature se ferait **côté client** : le serveur ne verrait jamais de clé privée.
+La **vérification** des signatures reste rigoureuse dans tous les cas — c'est elle qui
+fait respecter le PoA.
+
+Le champ **`nonce`** est facultatif : s'il est fourni, deux transactions du même
+émetteur ne peuvent pas partager le même nonce (anti-rejeu / idempotence). Utile
+pour qu'une re-soumission accidentelle (ou une double diffusion) ne crédite/débite
+pas deux fois.
+
+#### Exemples cURL
+
+```bash
+# Créditer un client (signé par la racine, pour la démo) puis miner
+curl -X POST localhost:5000/transactions/new \
+     -H 'Content-Type: application/json' \
+     -d '{"type":"credit","recipient":"YLIAalice","amount":50,"use_root":true}'
+curl localhost:5000/mine
+curl localhost:5000/balance/YLIAalice      # -> 50
+
+# Agréer un établissement
+curl -X POST localhost:5000/authorities/register \
+     -H 'Content-Type: application/json' -d '{"address":"YLIAetab1"}'
+```
+
+---
+
+## Démonstration des exigences du sujet
+
+Le script `python scripts/demo.py` lance trois nœuds et **prouve les cinq points
+de bout en bout** (y compris la détection de falsification et le rejet d'un nœud
+non agréé). Chaque point est aussi couvert par des tests :
+
+| Exigence du sujet | Démo | Tests |
+|---|---|---|
+| Création d'un bloc + chaînage cohérent | §1 | `test_block_and_chaining.py` |
+| Ajout de transactions puis minage | §2 | `test_transactions_and_mining.py` |
+| Détection d'une chaîne falsifiée | §3 | `test_falsification.py` |
+| Résolution de conflits (convergence) | §4 | `test_conflict_resolution.py` |
+| Validité du consensus (tx ET bloc non agréé rejetés) | §5 | `test_consensus_poa.py`, `test_network.py` |
+
+Essais manuels : `scripts/run_two_nodes.sh` lance deux nœuds (ports 5000/5001) ;
+on peut alors miner sur l'un (`curl localhost:5000/mine`), enregistrer l'autre
+comme pair, puis déclencher `curl localhost:5001/nodes/resolve`.
+
+---
+
+## Choix techniques
+
+- **Consensus : Proof of Authority** — justifié en détail plus haut. En une phrase :
+  un registre de fidélité est un réseau *à permission* (seuls des établissements
+  agréés écrivent), donc le PoA — fondé sur l'identité approuvée des validateurs —
+  est le choix naturel : pas de minage coûteux, transactions instantanées, et chaque
+  bloc est imputable à une autorité nommée.
+- **Cryptographie réelle (ECDSA / SECP256k1)** — chaque transaction et chaque bloc est
+  signé ; la vérification lie la clé publique à l'adresse de l'émetteur, ce qui empêche
+  l'usurpation. Signatures déterministes (RFC 6979) pour un genesis reproductible.
+- **Pas de base de données** — la chaîne vit en mémoire. L'état (soldes, autorités) est
+  intégralement *dérivé* en rejouant les transactions, à la manière d'un smart contract.
+- **Résolution de conflits** — règle de la *plus longue chaîne valide* : un nœud n'adopte
+  une chaîne pair que si elle est plus longue **et** entièrement valide (chaînage, hash,
+  signatures, agréments, soldes). Une chaîne plus longue mais falsifiée est rejetée.
+
+---
+
+## Difficultés rencontrées
+
+- **Genesis identique sur tous les nœuds.** La résolution de conflits compare des chaînes :
+  il faut donc que le bloc genesis soit *bit-à-bit* identique partout. Résolu en figeant
+  l'horodatage du genesis et en utilisant des signatures déterministes (RFC 6979) et une
+  racine dérivée d'une graine partagée.
+- **Hash déterministe.** Un `dict` Python n'a pas d'ordre de sérialisation garanti d'une
+  exécution à l'autre. Le hash est calculé sur du JSON **trié** (`sort_keys=True`,
+  séparateurs compacts) pour être strictement reproductible.
+- **Falsification « réparée ».** Recalculer le hash d'un bloc modifié ne suffit pas à
+  tromper la chaîne : la signature de la transaction ne correspond plus à son contenu et
+  le `previous_hash` du bloc suivant est rompu. La validation vérifie les trois (hash,
+  signatures, chaînage).
+- **Lier identité et autorisation.** Un attaquant pourrait signer une transaction avec sa
+  propre clé en se déclarant émetteur d'un autre. On vérifie donc systématiquement que
+  `adresse(clé_publique) == sender` avant d'accepter une signature.
+- **Bootstrap des autorités.** Pour pouvoir agréer le premier établissement, il faut une
+  autorité initiale : la *racine*, présente dès le genesis. Pour une démo locale sans
+  échange de secret, sa clé est déterministe (à remplacer par une vraie clé en production).
+- **Double-dépense dans le mempool.** Un débit est validé non seulement sur le solde
+  confirmé mais aussi en tenant compte des transactions déjà en attente, pour éviter de
+  débiter deux fois le même solde avant minage.
+- **Mempool après réorganisation.** Quand un nœud adopte une chaîne plus longue, une
+  transaction restée en attente peut être devenue invalide (débit qui n'est plus
+  financé, émetteur révoqué). Une première version se contentait de retirer les
+  transactions déjà inscrites ; résultat : une transaction devenue invalide bloquait
+  tout minage. Désormais, après adoption d'une chaîne, le mempool est **entièrement
+  revalidé** contre le nouvel état (`_revalidate_pending`) et les transactions devenues
+  invalides sont purgées.
+
+---
+
+## Limitations connues
+
+Ce projet est un **TP pédagogique** ; certains aspects sont volontairement simplifiés :
+
+- **Clé racine de démo.** La clé de l'autorité racine est déterministe (graine fixe)
+  pour que tous les nœuds partagent le même genesis sans échange de secret. En
+  production, elle serait générée aléatoirement et protégée (HSM, multi-signature).
+- **Signature côté serveur.** `private_key` / `use_root` permettent de signer côté
+  serveur pour faciliter les essais. Un déploiement réel signerait côté client ; seule
+  la *vérification* compte pour le consensus, et elle reste stricte.
+- **Idempotence applicative.** Deux transactions d'intention identique mais signées
+  séparément (donc de signatures différentes) restent deux opérations distinctes. Pour
+  une vraie protection « une seule fois », fournir un `nonce` stable par opération.
+- **Réseau best-effort.** La diffusion aux pairs est synchrone et tolérante aux pannes ;
+  la cohérence est rétablie à la demande via `/nodes/resolve` (plus longue chaîne valide),
+  pas par un protocole de consensus temps réel.
+- **Persistance.** La chaîne vit en mémoire (pas de base de données, conformément au
+  modèle) : un redémarrage repart du genesis.
+
