@@ -5,6 +5,7 @@ la gestion d'erreurs et les routes. Chaque test peut créer son app isolée.
 from __future__ import annotations
 
 from flask import Flask, render_template, request, jsonify, redirect
+from flask_cors import CORS
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +28,8 @@ def create_app(
     template_dir = str(Path(__file__).resolve().parents[1].parent / 'flask' / 'templates')
     static_dir = str(Path(__file__).resolve().parents[1].parent / 'flask' / 'static')
     app = Flask(__name__, template_folder=template_dir, static_folder=static_dir)
+    # Enable CORS for the demo dashboard so different ports can communicate
+    CORS(app, resources={r"/*": {"origins": "*"}})
     app.url_map.strict_slashes = False  # /chain == /chain/
 
     chain = blockchain if blockchain is not None else Blockchain()
@@ -106,6 +109,15 @@ def create_app(
     @app.get("/logs")
     def ui_logs():
         return jsonify({"logs": app.logs}), 200
+
+    @app.post("/logs")
+    def ui_append_log():
+        payload = request.get_json(silent=True) or {}
+        msg = payload.get("msg")
+        if not msg:
+            return jsonify({"error": "msg required"}), 400
+        app.logs.append({"msg": msg})
+        return jsonify({"message": "ok"}), 201
 
     app.register_blueprint(bp)
     return app

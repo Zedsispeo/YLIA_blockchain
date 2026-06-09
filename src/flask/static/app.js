@@ -119,11 +119,33 @@ document.getElementById('broadcast_tampered').addEventListener('click', async ()
 
     // post block to each peer's /blocks/propose
     const results = [];
+    // prepare a safe copy of the block: ensure transactions have required keys
+    function normalizeTx(tx){
+      // tx may be a plain object or already include fields
+      const now = Date.now()/1000;
+      return {
+        type: tx.type || tx['type'] || 'credit',
+        sender: tx.sender || tx['sender'] || 'attacker',
+        recipient: tx.recipient || tx['recipient'] || 'pizzha.se',
+        amount: ('amount' in tx) ? tx.amount || tx['amount'] || 0 : 0,
+        public_key: tx.public_key || tx['public_key'] || '',
+        timestamp: tx.timestamp || tx['timestamp'] || now,
+        nonce: tx.nonce || tx['nonce'] || '',
+        signature: ('signature' in tx) ? tx.signature || tx['signature'] : null,
+      };
+    }
+
+    const blockToSend = JSON.parse(JSON.stringify(block));
+    if(Array.isArray(blockToSend.transactions)){
+      blockToSend.transactions = blockToSend.transactions.map(t => normalizeTx(t));
+    }
+
     for(const p of peers){
       try{
-        const url = p.replace(/\/$/, '') + '/blocks/propose';
-        const resp = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({block})});
-        const json = await resp.json();
+        const url = p.replace(/\/$/, '') + '/blocks/receive';
+        // /blocks/receive expects the block dict as the top-level JSON body
+        const resp = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(blockToSend)});
+        const json = await resp.json().catch(()=>({}));
         results.push({peer:p, status: resp.status, body: json});
       }catch(err){
         results.push({peer:p, error: String(err)});
@@ -134,7 +156,17 @@ document.getElementById('broadcast_tampered').addEventListener('click', async ()
     const ok = results.filter(r => r.status && (r.status===201 || r.status===200));
     const nok = results.filter(r => !r.status || (r.status && r.status>=400));
     await refresh();
-    alert(`Broadcast done. accepted: ${ok.length}, rejected/error: ${nok.length}`);
+    // show detailed results
+    const lines = results.map(r => {
+      if(r.error) return `${r.peer}: ERROR ${r.error}`;
+      if(r.status===201 || r.status===200) return `${r.peer}: ACCEPTED`;
+      const reason = r.body && r.body.reason ? r.body.reason : JSON.stringify(r.body || {})
+      return `${r.peer}: REJECTED (${r.status}) - ${reason}`;
+    });
+    const msg = `Broadcast results:\n` + lines.join('\n');
+    // Append to server logs for visibility to all users
+    try{ await api('/logs','POST',{msg}); }catch(e){ console.warn('failed to append logs', e); }
+    alert(`Broadcast done.\n` + lines.join('\n'));
     console.log('broadcast results', results);
   }catch(e){ console.error(e); alert('Erreur lors du broadcast') }
 });
