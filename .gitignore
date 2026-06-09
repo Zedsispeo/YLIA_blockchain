@@ -1,6 +1,7 @@
-# YLIA : données de persistance d'un nœud (fichiers .ylia)
+# YLIA : données de persistance d'un nœud (chaîne .ylia, identité .key)
 data/
 *.ylia
+*.key
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

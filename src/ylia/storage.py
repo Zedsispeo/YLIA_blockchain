@@ -8,8 +8,8 @@ du seul genesis.
 - Lecture TOLÉRANTE : fichier absent, illisible ou malformé → None ; l'appelant
   (Blockchain) retombe alors proprement sur le genesis.
 
-Ce module ne connaît pas Blockchain : il reçoit un objet exposant `to_dict()`
-(duck typing), ce qui évite tout import circulaire.
+Ce module ne connaît pas Blockchain : il reçoit un objet exposant `to_dict()` et
+`peers` (duck typing), ce qui évite tout import circulaire.
 """
 
 from __future__ import annotations
@@ -21,8 +21,9 @@ from typing import Any
 
 
 def save_chain(path: str, blockchain) -> None:
-    """Sauvegarde la chaîne (format identique à /chain : {"chain": [...]})."""
+    """Sauvegarde la chaîne et la liste des pairs ({"chain": [...], "peers": [...]})."""
     payload = blockchain.to_dict()
+    payload["peers"] = sorted(blockchain.peers)
     directory = os.path.dirname(os.path.abspath(path))
     os.makedirs(directory, exist_ok=True)
 
@@ -42,8 +43,8 @@ def save_chain(path: str, blockchain) -> None:
         raise
 
 
-def load_chain(path: str) -> list[dict[str, Any]] | None:
-    """Liste brute des blocs stockés, ou None si absent / illisible / malformé."""
+def _load_payload(path: str) -> dict[str, Any] | None:
+    """Contenu JSON du fichier, ou None si absent / illisible / malformé."""
     if not path or not os.path.exists(path):
         return None
     try:
@@ -53,7 +54,26 @@ def load_chain(path: str) -> list[dict[str, Any]] | None:
         return None
     if not isinstance(data, dict):
         return None
+    return data
+
+
+def load_chain(path: str) -> list[dict[str, Any]] | None:
+    """Liste brute des blocs stockés, ou None si absent / illisible / malformé."""
+    data = _load_payload(path)
+    if data is None:
+        return None
     chain = data.get("chain")
     if not isinstance(chain, list):
         return None
     return chain
+
+
+def load_peers(path: str) -> list[str] | None:
+    """Liste des pairs stockés, ou None si absent / illisible / malformé."""
+    data = _load_payload(path)
+    if data is None:
+        return None
+    peers = data.get("peers")
+    if not isinstance(peers, list):
+        return None
+    return [p for p in peers if isinstance(p, str)]
