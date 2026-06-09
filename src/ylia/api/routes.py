@@ -170,7 +170,16 @@ def health():
 # --------------------------------------------------------------------------- #
 @bp.get("/chain")
 def get_chain():
-    return jsonify(_chain().to_dict())
+    chain = _chain()
+    # Build a serializable representation with per-block validation flags
+    blocks = []
+    for b in chain.chain:
+        bd = b.to_dict()
+        # Add validation metadata useful for the UI
+        bd["is_consistent"] = b.has_consistent_hash()
+        bd["is_valid_signature"] = b.has_valid_signature()
+        blocks.append(bd)
+    return jsonify({"chain": blocks, "length": len(blocks)})
 
 
 @bp.post("/transactions/new")
