@@ -6,6 +6,8 @@ services:
       - PORT=5000
     ports:
       - "5000:5000"
+    volumes:
+      - ./data/node_a:/app/data
 
   node_b:
     build: .
@@ -13,6 +15,8 @@ services:
       - PORT=5001
     ports:
       - "5001:5001"
+    volumes:
+      - ./data/node_b:/app/data
 
   node_c:
     build: .
@@ -21,4 +25,6 @@ services:
       - NODE_KEY=${NODE_C_KEY}
     ports:
       - "5002:5002"
+    volumes:
+      - ./data/node_c:/app/data
 
