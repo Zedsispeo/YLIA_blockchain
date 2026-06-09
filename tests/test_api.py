@@ -138,3 +138,40 @@ def test_idempotent_transaction_via_nonce(client):
     assert client.post("/transactions/new", json=body).status_code == 201
     # Même nonce → rejet (anti double-comptage).
     assert client.post("/transactions/new", json=body).status_code == 400
+
+
+def test_blocks_receive_accepts_valid_block(client):
+    from ylia.blockchain import Blockchain
+    from ylia.config import ROOT_PRIVATE_KEY
+
+    # Un autre nœud (même genesis) produit un bloc #1 valide.
+    other = Blockchain()
+    block = other.mine(ROOT_PRIVATE_KEY)
+    resp = client.post("/blocks/receive", json=block.to_dict())
+    assert resp.status_code == 201
+    assert resp.get_json()["accepted"] is True
+    assert client.get("/chain").get_json()["length"] == 2
+
+
+def test_blocks_receive_rejects_invalid_consensus(client):
+    import time
+
+    from ylia import crypto
+    from ylia.block import Block
+
+    # Bloc signé par un validateur NON agréé → consensus invalide.
+    outsider_priv, _ = crypto.generate_keypair()
+    opub = crypto.public_key_from_private(outsider_priv)
+    oaddr = crypto.address_from_public_key(opub)
+    genesis_hash = client.get("/chain").get_json()["chain"][0]["hash"]
+    forged = Block(index=1, timestamp=time.time(), transactions=[],
+                   previous_hash=genesis_hash, validator=oaddr, validator_pubkey=opub)
+    forged.sign(outsider_priv)
+
+    resp = client.post("/blocks/receive", json=forged.to_dict())
+    assert resp.status_code == 409
+    data = resp.get_json()
+    assert data["accepted"] is False
+    assert "non agréé" in data["reason"] or "consensus" in data["reason"]
+    # La chaîne n'a pas bougé.
+    assert client.get("/chain").get_json()["length"] == 1

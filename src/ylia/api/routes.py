@@ -9,6 +9,7 @@ from typing import Any
 from flask import Blueprint, current_app, jsonify, request
 
 from .. import crypto, node
+from ..block import Block
 from ..blockchain import ChainError
 from ..config import ROOT_PRIVATE_KEY
 from ..transaction import Transaction
@@ -29,6 +30,7 @@ ENDPOINTS: dict[str, str] = {
     "POST /nodes/register": "enregistrer des pairs : {\"nodes\": [\"http://…\"]}",
     "GET /nodes": "lister les pairs",
     "GET /nodes/resolve": "résolution de conflits (plus longue chaîne valide)",
+    "POST /blocks/receive": "recevoir un bloc d'un pair (rejeté si consensus invalide)",
     "GET /authorities": "liste blanche des autorités agréées",
     "POST /authorities/register": "agréer un établissement : {\"address\": \"YLIA…\"}",
     "POST /authorities/revoke": "révoquer un établissement : {\"address\": \"YLIA…\"}",
@@ -263,6 +265,25 @@ def resolve():
             ),
             "length": len(chain.chain),
         }
+    )
+
+
+@bp.post("/blocks/receive")
+def receive_block():
+    """Reçoit un bloc diffusé par un pair. Le bloc est REJETÉ (409) si son
+    consensus est invalide (validateur non agréé / signature de bloc invalide)
+    ou s'il ne chaîne pas correctement ; accepté (201) sinon."""
+    try:
+        block = Block.from_dict(_json_body())
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ApiError(f"bloc malformé : {exc}")
+    try:
+        _chain().add_block(block)
+    except ChainError as exc:
+        return jsonify({"accepted": False, "reason": str(exc)}), 409
+    return (
+        jsonify({"accepted": True, "message": f"bloc #{block.index} accepté", "block": block.to_dict()}),
+        201,
     )
 
 

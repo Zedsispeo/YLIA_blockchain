@@ -153,6 +153,23 @@ class Blockchain:
         self.pending_transactions = []
         return block
 
+    def add_block(self, block: Block) -> Block:
+        """Valide un bloc reçu (d'un pair) et l'ajoute s'il étend la tête de chaîne.
+
+        Lève ChainError si le bloc est invalide : chaînage, hash, **consensus**
+        (validateur non agréé / signature de bloc invalide) ou transactions.
+        """
+        if block.index != self.last_block.index + 1:
+            raise ChainError(
+                f"bloc #{block.index} : n'étend pas la tête de chaîne "
+                f"(attendu #{self.last_block.index + 1})"
+            )
+        authorities, balances = self._state_before_tip()
+        self._apply_block(block, self.last_block.hash, authorities, balances)
+        self.chain.append(block)
+        self._revalidate_pending()
+        return block
+
     # --- Validation ---
 
     def _genesis_is_authentic(self, block: Block) -> bool:
