@@ -8,7 +8,7 @@ from __future__ import annotations
 import time
 from typing import Any, Iterable
 
-from . import crypto
+from . import crypto, storage
 from .block import Block
 from .config import GENESIS_PREVIOUS_HASH, GENESIS_TIMESTAMP, ROOT_PRIVATE_KEY
 from .registry import ROOT_ADDRESS, ROOT_PUBLIC_KEY, authorities_from_transactions
@@ -20,11 +20,14 @@ class ChainError(ValueError):
 
 
 class Blockchain:
-    def __init__(self) -> None:
+    def __init__(self, storage_path: str | None = None) -> None:
         self.chain: list[Block] = []
         self.pending_transactions: list[Transaction] = []
         self.peers: set[str] = set()
+        # Fichier .ylia de persistance (None = chaîne purement en mémoire).
+        self.storage_path = storage_path
         self._create_genesis_block()
+        self._load_from_disk()
 
     # --- Genesis ---
 
@@ -50,6 +53,32 @@ class Blockchain:
         )
         block.sign(ROOT_PRIVATE_KEY)
         self.chain = [block]
+
+    # --- Persistance (fichier .ylia) ---
+
+    def _load_from_disk(self) -> None:
+        """Recharge la chaîne stockée si elle est présente et valide.
+
+        Tolérant : fichier absent/illisible/malformé ou chaîne invalide → on
+        garde le genesis (storage.load_chain ne lève jamais)."""
+        if not self.storage_path:
+            return
+        raw = storage.load_chain(self.storage_path)
+        if not raw:
+            return
+        try:
+            loaded = [Block.from_dict(b) for b in raw]
+        except (KeyError, TypeError, ValueError):
+            return  # contenu corrompu → on reste sur le genesis
+        # On n'adopte la chaîne stockée que si elle étend NOTRE genesis et qu'elle
+        # est intégralement valide (chaînage, hash, signatures, agréments, soldes).
+        if loaded and self.is_chain_valid(loaded):
+            self.chain = loaded
+
+    def _persist(self) -> None:
+        """Écrit la chaîne courante dans le fichier .ylia (atomique)."""
+        if self.storage_path:
+            storage.save_chain(self.storage_path, self)
 
     @property
     def root_address(self) -> str:
@@ -151,6 +180,7 @@ class Blockchain:
 
         self.chain.append(block)
         self.pending_transactions = []
+        self._persist()
         return block
 
     def add_block(self, block: Block) -> Block:
@@ -168,6 +198,7 @@ class Blockchain:
         self._apply_block(block, self.last_block.hash, authorities, balances)
         self.chain.append(block)
         self._revalidate_pending()
+        self._persist()
         return block
 
     # --- Validation ---
@@ -322,6 +353,7 @@ class Blockchain:
         if replaced:
             self.chain = best_chain
             self._revalidate_pending()
+            self._persist()
         return replaced
 
     def _revalidate_pending(self) -> None:

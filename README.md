@@ -31,7 +31,9 @@ pytest -q
 ```
 
 > Le projet est une **API REST en Python pur** : aucune base de données, aucune
-> compilation. La cryptographie (ECDSA / SECP256k1) est réelle, via `ecdsa`.
+> compilation. La cryptographie (ECDSA / SECP256k1) est réelle, via `ecdsa`. La
+> chaîne est **persistée sur disque** dans un fichier `.ylia` (un par nœud), donc
+> un nœud relancé **repart de son dernier état** et non du genesis.
 > *(Ce dépôt couvre le **backend / l'API** ; un client web le consomme séparément.)*
 
 ---
@@ -269,25 +271,27 @@ mettre en conformité, par ex. droit à l'effacement).
 
 ```
 YLIA_blockchain/
-├── main.py                 # point d'entrée d'un nœud (CLI : --port, --node-key, --new-key)
+├── main.py                 # point d'entrée d'un nœud (CLI : --port, --node-key, --new-key, --chain-file)
 ├── requirements.txt        # dépendances (Flask, ecdsa, requests, pytest)
 ├── README.md
 ├── src/ylia/
 │   ├── crypto.py           # cryptographie réelle : clés, signatures ECDSA, adresses
 │   ├── transaction.py      # transaction signée (credit / debit / register / revoke)
-│   ├── block.py            # bloc : hash SHA-256 déterministe + champ de consensus
+│   ├── block.py            # bloc en 3 lanes (toplane/midlane/botlane) + hash SHA-256 déterministe
 │   ├── registry.py         # registre d'agréments (liste blanche des autorités PoA)
-│   ├── blockchain.py       # chaîne, minage, validation, soldes, résolution de conflits
+│   ├── blockchain.py       # chaîne, minage, validation, soldes, résolution de conflits, persistance
+│   ├── storage.py          # sauvegarde/chargement de la chaîne dans un fichier .ylia (écriture atomique)
 │   ├── node.py             # communication réseau entre nœuds (pairs, diffusion)
-│   ├── config.py           # racine, genesis, ports
+│   ├── config.py           # racine, genesis, ports, chemin du fichier .ylia
 │   └── api/                # couche HTTP (séparée du cœur, donc testable)
 │       ├── __init__.py     #   factory create_app()
 │       ├── routes.py       #   Blueprint : toutes les routes
 │       └── errors.py       #   gestion d'erreurs JSON cohérente
+├── src/model/              # schéma du bloc : toplane (en-tête), midlane (signature), botlane (transactions)
 ├── scripts/
 │   ├── demo.py             # démonstration automatisée à 3 nœuds (les 5 points du sujet)
 │   └── run_two_nodes.sh    # lance 2 nœuds pour des essais manuels
-└── tests/                  # 56 tests pytest (cœur, consensus, réorg, réseau, API)
+└── tests/                  # 58 tests pytest (cœur, consensus, réorg, réseau, API)
 ```
 
 La **séparation cœur / transport** est volontaire : le domaine (`blockchain.py`,
@@ -297,14 +301,29 @@ ne fait que traduire HTTP ↔ domaine. La factory `create_app(blockchain=…)` p
 
 ### Structure d'un bloc (exigence du sujet)
 
-| Champ | Rôle |
-|---|---|
-| `index` | position dans la chaîne (0 = genesis) |
-| `timestamp` | horodatage de production |
-| `transactions` | liste des transactions incluses |
-| `previous_hash` | hash du bloc précédent (chaînage) |
-| `hash` | **SHA-256 déterministe** du bloc (JSON trié) |
-| `validator`, `validator_pubkey`, `signature` | **champ de consensus PoA** : l'autorité qui a produit le bloc et sa signature |
+Le bloc suit le schéma de `src/model/`, organisé en **trois « lanes »** :
+
+- **`toplane`** (en-tête) : `version`, `index`, `timestamp`, `previous_hash`, `merkle_root`, `txcount`, `author`.
+- **`midlane`** (couche de signature) : `validator_pubkey`, `signature`, `hash`.
+- **`botlane`** (corps) : `transactions`.
+
+| Champ | Lane | Rôle |
+|---|---|---|
+| `version` | top | version du format de bloc |
+| `index` | top | position dans la chaîne (0 = genesis) |
+| `timestamp` | top | horodatage de production |
+| `previous_hash` | top | hash du bloc précédent (chaînage) |
+| `merkle_root` | top | racine de Merkle des transactions (l'en-tête s'engage sur le corps) |
+| `txcount` | top | nombre de transactions du bloc |
+| `author` (= `validator`) | top | adresse de l'autorité qui a produit le bloc |
+| `validator_pubkey` | mid | clé publique du validateur (liée à `author`) |
+| `signature` | mid | signature ECDSA du `hash` par le validateur |
+| `hash` | mid | **SHA-256 déterministe** de l'en-tête (`toplane`, JSON trié) |
+| `transactions` | bot | liste des transactions incluses |
+
+> Le `hash` porte sur le `toplane`, qui s'engage sur les transactions via `merkle_root` :
+> toute modification d'une transaction change la racine, donc le hash → falsification détectée.
+> `author`, `validator_pubkey` et `signature` forment le **champ de consensus PoA**.
 
 ---
 
@@ -427,8 +446,16 @@ comme pair, puis déclencher `curl localhost:5001/nodes/resolve`.
 - **Cryptographie réelle (ECDSA / SECP256k1)** — chaque transaction et chaque bloc est
   signé ; la vérification lie la clé publique à l'adresse de l'émetteur, ce qui empêche
   l'usurpation. Signatures déterministes (RFC 6979) pour un genesis reproductible.
-- **Pas de base de données** — la chaîne vit en mémoire. L'état (soldes, autorités) est
-  intégralement *dérivé* en rejouant les transactions, à la manière d'un smart contract.
+- **Pas de base de données** — l'état (soldes, autorités) n'est jamais stocké : il est
+  intégralement *dérivé* en rejouant les transactions de la chaîne, à la manière d'un
+  smart contract. Seule la **chaîne** est persistée.
+- **Persistance fichier (`.ylia`)** — la chaîne est sauvegardée dans un fichier `.ylia`
+  (JSON, un fichier par nœud : `data/ylia-<port>.ylia`) après chaque bloc miné, reçu ou
+  adopté lors d'une résolution de conflits. L'écriture est **atomique** (fichier temporaire
+  + `fsync` + `os.replace`) : un crash en cours d'écriture ne corrompt jamais le fichier.
+  Au démarrage, la chaîne stockée n'est rechargée que si elle est **intégralement valide**
+  (genesis authentique, chaînage, hash, signatures, agréments, soldes) ; sinon le nœud
+  repart du genesis.
 - **Résolution de conflits** — règle de la *plus longue chaîne valide* : un nœud n'adopte
   une chaîne pair que si elle est plus longue **et** entièrement valide (chaînage, hash,
   signatures, agréments, soldes). Une chaîne plus longue mais falsifiée est rejetée.
@@ -483,6 +510,9 @@ Ce projet est un **TP pédagogique** ; certains aspects sont volontairement simp
 - **Réseau best-effort.** La diffusion aux pairs est synchrone et tolérante aux pannes ;
   la cohérence est rétablie à la demande via `/nodes/resolve` (plus longue chaîne valide),
   pas par un protocole de consensus temps réel.
-- **Persistance.** La chaîne vit en mémoire (pas de base de données, conformément au
-  modèle) : un redémarrage repart du genesis.
+- **Persistance partielle.** La **chaîne** est persistée sur disque (fichier `.ylia`),
+  donc un nœud relancé repart de son dernier état. En revanche, le **mempool**
+  (transactions en attente) et la **liste des pairs** restent en mémoire : ils sont perdus
+  au redémarrage (les pairs se réenregistrent via `/nodes/register`, le mempool se
+  reconstitue par diffusion ou nouvelles soumissions).
 
