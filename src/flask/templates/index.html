@@ -58,7 +58,7 @@
           
           <div style="display:flex;flex-direction:column;gap:8px;">
             <button id="tamper_submit" class="btn warn">Introduire une erreur</button>
-            <button id="broadcast_tampered" class="btn">Broadcast Tampered Block</button>
+            <button id="broadcast_tampered" class="btn">Envoyer le Block (broadcast index)</button>
           </div>
         </div>
       </section>
@@ -70,7 +70,7 @@
           <div>Pending Tx: <span id="pending_count">0</span></div>
           <div>Peers: <span id="peers_list" class="muted">(none)</span></div>
         </div>
-        <div class="timeline">
+        <div class="timeline" style="flex-wrap: wrap;">
           <div class="step" id="step_tx">1. Tx created</div>
           <div class="step" id="step_mine">2. Mined</div>
           <div class="step" id="step_tamper">3. Tampered</div>
