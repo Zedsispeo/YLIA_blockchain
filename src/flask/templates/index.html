@@ -11,6 +11,7 @@
     <header class="topbar">
       <div class="brand">Pizzhashé</div>
       <div class="subtitle">Blockchain Demo — visualisez la chaîne et les scénarios</div>
+      <div id="connected_as" style="margin-left:auto;padding:8px 12px;color:#fff;font-weight:600"></div>
     </header>
 
     <main class="container">
@@ -25,16 +26,16 @@
 
         <h3>Ajouter une transaction</h3>
         <div class="row form">
-          <div style="display: flex; flex-direction: column; flex: 1;">
-            <label for="tamper_index">Client:</label>
-            <input id="sender" placeholder="Sender" value="customer_123">
+          <div style="display: none;">
+            <label for="identity_select">Se connecter en tant que</label>
+            <select id="identity_select" style="display:none"></select>
           </div>
           <div style="display: flex; flex-direction: column; flex: 1;">
-            <label for="tamper_index">Destinataire:</label>
-            <input id="recipient" placeholder="Recipient" value="pizzha.se">
+            <label for="recipient">Destinataire</label>
+            <select id="recipient"></select>
           </div>
           <div style="display: flex; flex-direction: column; flex: 1;">
-            <label for="tamper_index">Montant:</label>
+            <label for="tamper_index">Montant</label>
             <input id="amount" placeholder="Amount" value="1">
           </div>
           <button id="addtx" class="btn warn">Ajouter</button>
@@ -69,6 +70,9 @@
           <div>Valitidé de la chaîne: <span id="valid_status" class="pill">—</span></div>
           <div>Pending Tx: <span id="pending_count">0</span></div>
           <div>Peers: <span id="peers_list" class="muted">(none)</span></div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <button id="authorize_responsable" class="btn warn">Autoriser responsable</button>
+          </div>
         </div>
         <div class="timeline" style="flex-wrap: wrap;">
           <div class="step" id="step_tx">1. Tx created</div>
@@ -90,6 +94,14 @@
         <div id="logs">(no logs)</div>
       </aside>
     </main>
+
+    <div id="role_picker" style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.5);z-index:9999">
+      <div style="color: black; background:white;padding:28px;border-radius:10px;max-width:720px;width:90%;text-align:center">
+        <h2>Se connecter comme</h2>
+        <div id="role_buttons" style="color: black; display:flex;gap:12px;justify-content:center;margin-top:12px"></div>
+        <div style="margin-top:16px;color:#666;font-size:14px">Vous pouvez changer de rôle à tout moment depuis le bandeau.</div>
+      </div>
+    </div>
 
     <footer class="footer">Pizzhashé demo — TP Blockchain</footer>
 

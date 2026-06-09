@@ -7,11 +7,12 @@
   --glass: rgba(255,255,255,0.03);
 }
 *{box-sizing:border-box}
+html,body{overflow-x:hidden}
 body{font-family:Inter,system-ui,Arial,sans-serif;background:linear-gradient(180deg,#071023 0%, #0b1220 100%);color:#e6eef6;margin:0;padding:18px}
 .topbar{display:flex;align-items:center;gap:16px;padding:12px 18px;margin-bottom:18px}
 .brand{font-weight:700;font-size:20px;color:var(--accent)}
 .subtitle{color:var(--muted);font-size:13px}
-.container{display:grid;grid-template-columns:1fr 320px;gap:18px}
+.container{display:grid;grid-template-columns:1fr 320px;gap:18px;margin:0 auto}
 .card{background:var(--card);padding:16px;border-radius:10px;box-shadow:0 6px 18px rgba(2,6,23,0.6)}
 .controls{grid-column:1 / span 1}
 .status{grid-column:2 / span 1;margin-bottom:0}
@@ -23,7 +24,7 @@ body{font-family:Inter,system-ui,Arial,sans-serif;background:linear-gradient(180
 .btn{padding:8px 12px;border-radius:8px;background:transparent;border:1px solid rgba(255,255,255,0.06);color:#e6eef6;cursor:pointer}
 .btn.primary{background:linear-gradient(90deg,var(--accent),var(--accent-2));border:0}
 .btn.warn{background:#ff8b61;border:0}
-.status-row{display:flex;gap:12px;align-items:center}
+.status-row{display:flex;gap:12px;align-items:center; flex-direction: column;}
 .pill{display:inline-block;padding:6px 8px;border-radius:999px;background:rgba(255,255,255,0.03);color:var(--muted);margin-left:8px}
 .pill.valid{background:linear-gradient(90deg,#2ee6a6,#6be3d8);color:#04241a}
 .pill.invalid{background:linear-gradient(90deg,#ff9b9b,#ff6b6b);color:#2a0606}
@@ -36,6 +37,12 @@ body{font-family:Inter,system-ui,Arial,sans-serif;background:linear-gradient(180
 .block-head{display:flex;justify-content:space-between;align-items:center}
 .muted{color:var(--muted);font-size:13px}
 .txlist{margin-top:8px;padding-left:8px}
+.txlist pre{white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere;max-width:100%}
+.block-card, .card{overflow-wrap:anywhere}
+
+/* role picker overlay should center and not cause overflow */
+#role_picker{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.5);z-index:9999;padding:16px}
+#role_picker > div{max-width:940px;width:100%;box-sizing:border-box}
 .hash{font-family:monospace;font-size:12px;color:#9fb1c9}
 .footer{text-align:center;color:var(--muted);margin-top:18px}
 .logs div{max-height:240px;overflow:auto;font-family:monospace;font-size:13px;color:#cfe6ff}
