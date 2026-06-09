@@ -1,5 +1,20 @@
 const POLL_INTERVAL = 1500;
 
+// Attache un listener uniquement si l'élément existe. La page client ne contient
+// qu'une partie des contrôles du tableau de bord ; sans ce garde-fou, un
+// getElementById(...) null faisait planter tout le script et désactivait de fait
+// le bouton "Register Peer".
+function on(id, event, handler){
+  const el = document.getElementById(id);
+  if (el) el.addEventListener(event, handler);
+}
+
+// Met à jour textContent d'un élément seulement s'il est présent.
+function setText(id, value){
+  const el = document.getElementById(id);
+  if (el) el.textContent = value;
+}
+
 async function api(path, method='GET', body=null){
   const opts = { method, headers: {} };
   if (body){ opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
@@ -38,23 +53,39 @@ function renderBlocks(chain){
 
 function renderLogs(logs){
   const el = document.getElementById('logs');
+  if(!el) return;
   if(!logs || logs.length===0){ el.textContent = '(no logs)'; return }
   el.innerHTML = logs.map(l=>`<div>• ${l.msg}</div>`).join('');
 }
 
 function setValid(valid){
   const v = document.getElementById('valid_status');
+  if(!v) return;
   v.textContent = valid ? 'VALID' : 'INVALID';
   v.className = 'pill ' + (valid ? 'valid' : 'invalid');
 }
 
+// Solde du client : l'identité du nœud (issue de sa clé) donne l'adresse, dont
+// on lit ensuite le solde confirmé. Le client est destinataire passif de credits.
+async function refreshBalance(){
+  try{
+    const info = await api('/node');
+    const address = info.address;
+    setText('client_address', address || '—');
+    if(!address) return;
+    const bal = await api('/balance/' + encodeURIComponent(address));
+    setText('token_balance', bal.balance ?? 0);
+  }catch(e){ console.error(e); setText('token_balance', '—'); }
+}
+
 async function refresh(){
   try{
+    await refreshBalance();
     const data = await api('/chain');
     renderBlocks(data.chain || []);
     // pending transactions endpoint
     const pending = await api('/pending');
-    document.getElementById('pending_count').textContent = pending.count || 0;
+    setText('pending_count', pending.count || 0);
     // validation endpoint
     const valid = await api('/validate');
     setValid(Boolean(valid.valid));
@@ -62,8 +93,8 @@ async function refresh(){
     try{
       const nodes = await api('/nodes');
       const peers = nodes.peers || [];
-      document.getElementById('peers_list').textContent = peers.length ? peers.join(', ') : '(none)';
-    }catch(e){ document.getElementById('peers_list').textContent = '(error)'; }
+      setText('peers_list', peers.length ? peers.join(', ') : '(none)');
+    }catch(e){ setText('peers_list', '(error)'); }
     const logs = await api('/logs');
     renderLogs(logs.logs || []);
   }catch(e){ console.error(e) }
@@ -71,7 +102,7 @@ async function refresh(){
 
 document.getElementById('refresh').addEventListener('click', refresh);
 
-document.getElementById('mine').addEventListener('click', async ()=>{
+on('mine', 'click', async ()=>{
   try{
     const data = await api('/mine');
     await refresh();
@@ -80,7 +111,7 @@ document.getElementById('mine').addEventListener('click', async ()=>{
   }catch(e){ console.error(e) }
 });
 
-document.getElementById('addtx').addEventListener('click', async ()=>{
+on('addtx', 'click', async ()=>{
   const sender = document.getElementById('sender').value;
   const recipient = document.getElementById('recipient').value;
   const amount = Number(document.getElementById('amount').value);
@@ -93,7 +124,7 @@ document.getElementById('addtx').addEventListener('click', async ()=>{
   }catch(e){ console.error(e) }
 });
 
-document.getElementById('tamper_submit').addEventListener('click', async ()=>{
+on('tamper_submit', 'click', async ()=>{
   const idx = Number(document.getElementById('tamper_index').value);
   let tx;
   try{ tx = JSON.parse(document.getElementById('tamper_tx').value); }catch(e){ alert('Transaction JSON invalide'); return }
@@ -105,7 +136,7 @@ document.getElementById('tamper_submit').addEventListener('click', async ()=>{
   }catch(e){ console.error(e) }
 });
 
-document.getElementById('broadcast_tampered').addEventListener('click', async ()=>{
+on('broadcast_tampered', 'click', async ()=>{
   const idx = Number(document.getElementById('tamper_index').value);
   if(!idx){ alert('Choisir un index de bloc à broadcast'); return }
   try{
@@ -171,7 +202,7 @@ document.getElementById('broadcast_tampered').addEventListener('click', async ()
   }catch(e){ console.error(e); alert('Erreur lors du broadcast') }
 });
 
-document.getElementById('resolve').addEventListener('click', async ()=>{
+on('resolve', 'click', async ()=>{
   try{
     const data = await api('/nodes/resolve');
     markStep('step_resolve');
@@ -180,7 +211,7 @@ document.getElementById('resolve').addEventListener('click', async ()=>{
   }catch(e){ console.error(e) }
 });
 
-document.getElementById('reset_demo').addEventListener('click', async ()=>{
+on('reset_demo', 'click', async ()=>{
   if(!confirm('Reset demo to genesis state? This will clear the chain and logs.')) return;
   try{
     const data = await api('/reset','POST',{});
@@ -190,9 +221,9 @@ document.getElementById('reset_demo').addEventListener('click', async ()=>{
   }catch(e){ console.error(e) }
 });
 
-document.getElementById('add_peer').addEventListener('click', async ()=>{
+on('add_peer', 'click', async ()=>{
   const addr = document.getElementById('peer_addr').value.trim();
-  if(!addr){ alert('Entrez l\'URL du pair, ex: http://node_b:5001'); return }
+  if(!addr){ alert('Entrez l\'URL du pair, ex: http://node_a:5000'); return }
   try{
     const data = await api('/nodes/register','POST',{nodes:[addr]});
     await refresh();

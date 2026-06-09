@@ -63,6 +63,14 @@ def create_app(
     def ui_client():
         return render_template("client.html")
 
+    def _is_establishment() -> bool:
+        """Le nœud est-il un établissement ? Oui s'il fait autorité (racine
+        comprise) ; sinon c'est un simple client. Déterminé par l'identité
+        issue de sa clé (.key) confrontée à la liste blanche on-chain."""
+        addr = app.node_identity["address"]
+        chain = app.blockchain
+        return addr == chain.root_address or addr in chain.current_authorities()
+
     # Redirect root to the UI for convenience (keeps existing blueprint routes intact)
     @app.before_request
     def _root_redirect():
@@ -72,7 +80,8 @@ def create_app(
             ua = request.headers.get("User-Agent", "")
             browser_signals = ("Mozilla", "Chrome", "Safari", "Edge", "Firefox")
             if any(sig in ua for sig in browser_signals):
-                return redirect('/ui')
+                # Aiguillage selon la clé : établissement → /ui, client → /client.
+                return redirect('/ui' if _is_establishment() else '/client')
 
     @app.post("/tamper")
     def ui_tamper():

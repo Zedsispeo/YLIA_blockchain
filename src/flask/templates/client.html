@@ -14,13 +14,41 @@
     </header>
 
     <main class="container">
-      <section class="controls card">
+      <section class="balance card" id="balance_section">
+        <h2>Mes tokens</h2>
+        <div class="balance-amount"><span id="token_balance">—</span> <span class="token-unit">tokens</span></div>
+        <div class="muted">Adresse : <span id="client_address" class="hash">—</span></div>
+      </section>
 
+      <section class="controls card">
+        <h2>Actions</h2>
+        <div class="row">
+          <button id="refresh" class="btn">Refresh</button>
+          <button id="resolve" class="btn">Resolve Conflicts</button>
+          <button id="reset_demo" class="btn warn">Reset Demo</button>
+        </div>
 
         <h3>Peers (réseau)</h3>
         <div class="row form">
-          <input id="peer_addr" placeholder="http://host:port" value="http://localhost:5001">
+          <input id="peer_addr" placeholder="http://host:port" value="http://node_a:5000">
           <button id="add_peer" class="btn">Register Peer</button>
+        </div>
+      </section>
+
+            <section class="status card">
+        <h2>Demo Status</h2>
+        <div class="status-row">
+          <div>Valitidé de la chaîne: <span id="valid_status" class="pill">—</span></div>
+          <div>Pending Tx: <span id="pending_count">0</span></div>
+          <div>Peers: <span id="peers_list" class="muted">(none)</span></div>
+        </div>
+        <div class="timeline" style="flex-wrap: wrap;">
+          <div class="step" id="step_tx">1. Tx created</div>
+          <div class="step" id="step_mine">2. Mined</div>
+          <div class="step" id="step_tamper">3. Tampered</div>
+          <div class="step" id="step_validate">4. Validated</div>
+          <div class="step" id="step_resolve">5. Resolved</div>
+          <div class="step" id="step_reset">6. Reset</div>
         </div>
       </section>
 
