@@ -8,7 +8,7 @@ from flask import Flask
 
 from .. import crypto
 from ..blockchain import Blockchain
-from ..config import NODE_PRIVATE_KEY
+from ..config import ROOT_PRIVATE_KEY
 from .errors import register_error_handlers
 from .routes import bp
 
@@ -23,7 +23,10 @@ def create_app(
     app.url_map.strict_slashes = False  # /chain == /chain/
 
     chain = blockchain if blockchain is not None else Blockchain()
-    node_key = node_private_key or NODE_PRIVATE_KEY
+    # Sans identité fournie, on retombe sur la racine : create_app reste utilisable
+    # en mémoire (tests/lib). L'identité propre et persistée d'un nœud est résolue
+    # en amont, au démarrage (main.py → identity.resolve_node_key).
+    node_key = node_private_key or ROOT_PRIVATE_KEY
     public_key = crypto.public_key_from_private(node_key)
     address = crypto.address_from_public_key(public_key)
 

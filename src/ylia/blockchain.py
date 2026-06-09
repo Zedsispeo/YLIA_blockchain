@@ -63,6 +63,9 @@ class Blockchain:
         garde le genesis (storage.load_chain ne lève jamais)."""
         if not self.storage_path:
             return
+        peers = storage.load_peers(self.storage_path)
+        if peers:
+            self.peers = set(peers)
         raw = storage.load_chain(self.storage_path)
         if not raw:
             return
@@ -412,6 +415,7 @@ class Blockchain:
 
     def register_peer(self, address: str) -> None:
         self.peers.add(address.rstrip("/"))
+        self._persist()
 
     def to_dict(self) -> dict[str, Any]:
         return {
