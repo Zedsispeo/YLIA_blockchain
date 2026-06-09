@@ -16,7 +16,7 @@ sys.path.insert(0, "src")
 from ylia import crypto  # noqa: E402
 from ylia.api import create_app  # noqa: E402
 from ylia.blockchain import Blockchain  # noqa: E402
-from ylia.config import DEFAULT_PORT, NODE_PRIVATE_KEY  # noqa: E402
+from ylia.config import DEFAULT_PORT, NODE_PRIVATE_KEY, chain_file_for  # noqa: E402
 
 
 def main() -> None:
@@ -34,13 +34,20 @@ def main() -> None:
         help="génère une identité d'établissement aléatoire pour ce nœud "
         "(devra être agréée par la racine avant de pouvoir miner)",
     )
+    parser.add_argument(
+        "--chain-file",
+        default=None,
+        help="fichier .ylia de persistance de la chaîne "
+        "(par défaut : data/ylia-<port>.ylia ; YLIA_CHAIN_FILE pour forcer)",
+    )
     args = parser.parse_args()
 
     node_key = args.node_key
     if args.new_key:
         node_key, _ = crypto.generate_keypair()
 
-    blockchain = Blockchain()
+    chain_file = args.chain_file or chain_file_for(args.port)
+    blockchain = Blockchain(storage_path=chain_file)
     app = create_app(blockchain=blockchain, node_private_key=node_key)
 
     address = crypto.address_from_private_key(node_key)
@@ -50,6 +57,7 @@ def main() -> None:
     print(f"  Identité du nœud : {address}")
     print(f"  Autorité agréée  : {'oui' if is_authority else 'non (à faire agréer)'}")
     print(f"  Racine du réseau : {blockchain.root_address}")
+    print(f"  Stockage (.ylia) : {chain_file}  (blocs : {len(blockchain.chain)})")
     print(f"  Index de l'API   : http://{args.host}:{args.port}/  (catalogue des routes)")
     print("=" * 64)
 

@@ -1,3 +1,7 @@
+# YLIA : données de persistance d'un nœud (fichiers .ylia)
+data/
+*.ylia
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
