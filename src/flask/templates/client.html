@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Pizzhashé — Blockchain Demo</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">CLIENT</div>
+      <div class="subtitle">Blockchain Demo — visualisez le nombre de token</div>
+    </header>
+
+    <main class="container">
+      <section class="controls card">
+
+
+        <h3>Peers (réseau)</h3>
+        <div class="row form">
+          <input id="peer_addr" placeholder="http://host:port" value="http://localhost:5001">
+          <button id="add_peer" class="btn">Register Peer</button>
+        </div>
+      </section>
+
+      <section class="chain card" id="chain_section">
+        <h2>Blockchain</h2>
+        <div id="blocks" class="blocks">Chargement...</div>
+      </section>
+
+      <aside class="logs card">
+        <h2>Logs</h2>
+        <div id="logs">(no logs)</div>
+      </aside>
+    </main>
+
+    <footer class="footer">CLIENT demo — TP Blockchain</footer>
+
+    <script src="/static/client.js"></script>
+  </body>
+ </html>

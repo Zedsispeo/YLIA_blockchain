@@ -56,6 +56,10 @@ def create_app(
     def ui_index():
         return render_template("index.html")
 
+    @app.get("/client")
+    def ui_client():
+        return render_template("client.html")
+
     # Redirect root to the UI for convenience (keeps existing blueprint routes intact)
     @app.before_request
     def _root_redirect():
