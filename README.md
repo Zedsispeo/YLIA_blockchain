@@ -516,3 +516,96 @@ Ce projet est un **TP pédagogique** ; certains aspects sont volontairement simp
   au redémarrage (les pairs se réenregistrent via `/nodes/register`, le mempool se
   reconstitue par diffusion ou nouvelles soumissions).
 
+
+## Tests fonctionnels de la blockchain
+
+## 1. Création d'un bloc
+
+### Étapes
+
+1. Se connecter avec un compte disposant du rôle **Responsable**.
+2. Effectuer l'autorisation du responsable.
+3. Ajouter une ou plusieurs transactions.
+4. Lancer le processus de minage.
+
+### Résultat attendu
+
+✅ Un nouveau bloc est créé et ajouté à la chaîne.
+
+---
+
+## 2. Vérification de la détection d'erreurs
+
+### Étapes
+
+1. Créer un nouveau bloc (voir scénario n°1).
+2. Injecter une erreur dans un bloc dont l'index est supérieur à `0` (par exemple `1`, `2`, etc.).
+3. Ajouter une transaction frauduleuse telle que :
+
+```json
+{
+  "sender": "attacker",
+  "recipient": "pizzha.se",
+  "amount": 9999
+}
+```
+
+### Résultat attendu
+
+✅ Le système détecte l'altération et signale le bloc concerné (par exemple le bloc d'index `2`) comme invalide en l'entourant en rouge et indiquant le message.
+
+---
+
+## 3. Résolution de conflits – Cas n°1
+
+### Étapes
+
+1. Démarrer deux nœuds sur les ports `5000` et `5001`.
+2. Sur le nœud `5000`, ajouter `5001` à la liste des pairs (*peers*).
+3. Sur le nœud `5000`, créer un nouveau bloc.
+4. Sur le nœud `5001`, créer deux nouveaux blocs.
+5. Depuis le nœud `5001`, lancer la résolution des conflits.
+
+### Résultat attendu
+
+✅ La chaîne actuelle du nœud `5001` est conservée, car elle est la plus longue.
+
+---
+
+## 4. Résolution de conflits – Cas n°2
+
+### Étapes
+
+1. Démarrer deux nœuds sur les ports `5000` et `5001`.
+2. Sur le nœud `5000`, ajouter `5001` à la liste des pairs (*peers*).
+3. Sur le nœud `5001`, créer un bloc.
+4. Sur le nœud `5000`, créer deux blocs.
+5. Depuis le nœud `5001`, lancer la résolution des conflits.
+
+### Résultat attendu
+
+✅ Le nœud `5001` récupère et adopte la chaîne du nœud `5000`, celle-ci étant plus longue.
+
+---
+
+## 5. Envoi d'un bloc aux pairs (bloc valide ou corrompu)
+
+### Étapes
+
+1. Démarrer deux nœuds sur les ports `5000` et `5001`.
+2. Sur le nœud `5000`, ajouter `5001` à la liste des pairs (*peers*).
+3. Sur le nœud `5000`, créer un nouveau bloc.
+4. Saisir l'index du bloc à transmettre (par exemple `2`, l'index `1` pouvant correspondre à l'autorisation du responsable).
+5. Cliquer sur **« Envoyer le bloc »**.
+
+### Résultats attendus
+
+#### Cas 1 : chaînes divergentes
+
+❌ Si le bloc de tête du pair destinataire est différent, le transfert est rejeté et une erreur est signalée.
+
+#### Cas 2 : chaînes synchronisées
+
+✅ Si les blocs de tête sont identiques (par exemple après une résolution de conflit réussie), le bloc est accepté et intégré correctement.
+
+

@@ -170,13 +170,32 @@ def health():
 # --------------------------------------------------------------------------- #
 @bp.get("/chain")
 def get_chain():
-    return jsonify(_chain().to_dict())
+    chain = _chain()
+    # Build a serializable representation with per-block validation flags
+    blocks = []
+    for b in chain.chain:
+        bd = b.to_dict()
+        # Add validation metadata useful for the UI
+        bd["is_consistent"] = b.has_consistent_hash()
+        bd["is_valid_signature"] = b.has_valid_signature()
+        blocks.append(bd)
+    return jsonify({"chain": blocks, "length": len(blocks)})
 
 
 @bp.post("/transactions/new")
 def new_transaction():
     chain = _chain()
-    tx = _build_transaction(_json_body())
+    payload = _json_body()
+    tx = _build_transaction(payload)
+
+    if payload.get("private_key") and not payload.get("use_root"):
+        authorities = chain.current_authorities()
+        if tx.type in ("credit", "debit") and tx.sender not in authorities:
+            raise ApiError(
+                "émetteur non agréé : seul un établissement agréé peut émettre des transactions",
+                403,
+            )
+
     block_index = chain.add_transaction(tx)  # ChainError → 400
     if request.args.get("broadcast", "true").lower() != "false" and chain.peers:
         node.broadcast_transaction(chain.peers, tx.to_dict())
@@ -266,6 +285,44 @@ def resolve():
             "length": len(chain.chain),
         }
     )
+
+
+# --------------------------------------------------------------------------- #
+# Demo helpers (front-end can register a demo 'responsable' identity)
+# --------------------------------------------------------------------------- #
+@bp.post("/demo/roles")
+def demo_roles_register():
+    """Register a demo role mapping: {"role": "responsable", "address": "YLIA..."}
+    Stored in app config under 'DEMO_ROLES'. This is for the demo UI only."""
+    payload = _json_body()
+    role = payload.get("role")
+    address = payload.get("address")
+    if not role or not address:
+        raise ApiError("'role' et 'address' sont requis")
+    # Persist demo roles to disk to survive reloader/multiple processes.
+    roles = _load_demo_roles()
+    roles[role] = address
+    _save_demo_roles(roles)
+    # also keep in-memory copy for this process
+    current_app.config["DEMO_ROLES"] = roles
+    return jsonify({"message": f"role {role} enregistré", "demo_roles": roles}), 201
+
+
+@bp.get("/demo/roles")
+def demo_roles_list():
+    roles = _load_demo_roles()
+    # mirror into config for this process
+    current_app.config["DEMO_ROLES"] = roles
+    return jsonify({"demo_roles": roles})
+
+
+def _load_demo_roles() -> dict:
+    return {
+        "customer1": "YLIA_demo_customer1",
+        "customer2": "YLIA_demo_customer2",
+        "responsable": "YLIA_demo_responsable",
+    }
+
 
 
 @bp.post("/blocks/receive")

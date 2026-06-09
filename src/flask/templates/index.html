@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Pizzhashé — Blockchain Demo</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">Pizzhashé</div>
+      <div class="subtitle">Blockchain Demo — visualisez la chaîne et les scénarios</div>
+      <div id="connected_as" style="margin-left:auto;padding:8px 12px;color:#fff;font-weight:600"></div>
+    </header>
+
+    <main class="container">
+      <section class="controls card">
+        <h2>Actions</h2>
+        <div class="row">
+          <button id="refresh" class="btn">Refresh</button>
+          <button id="mine" class="btn primary">Mine</button>
+          <button id="resolve" class="btn">Resolve Conflicts</button>
+          <button id="reset_demo" class="btn warn">Reset Demo</button>
+        </div>
+
+        <h3>Ajouter une transaction</h3>
+        <div class="row form">
+          <div style="display: none;">
+            <label for="identity_select">Se connecter en tant que</label>
+            <select id="identity_select" style="display:none"></select>
+          </div>
+          <div style="display: flex; flex-direction: column; flex: 1;">
+            <label for="recipient">Destinataire</label>
+            <select id="recipient"></select>
+          </div>
+          <div style="display: flex; flex-direction: column; flex: 1;">
+            <label for="tamper_index">Montant</label>
+            <input id="amount" placeholder="Amount" value="1">
+          </div>
+          <button id="addtx" class="btn warn">Ajouter</button>
+        </div>
+        <h3>Peers (réseau)</h3>
+        <div class="row form">
+          <input id="peer_addr" placeholder="http://host:port" value="http://localhost:5001">
+          <button id="add_peer" class="btn">Register Peer</button>
+        </div>
+
+        <h3>Introduire une erreur</h3>
+        <div class="row form">
+          <div style="display: flex; flex-direction: column; flex: 1;">
+            <label for="tamper_index">Index du bloc:</label>
+            <input id="tamper_index" placeholder="Block index (e.g. 2)" type="number" min="1">
+          </div>
+          <div style="display: flex; flex-direction: column; flex: 1;">
+            <label for="tamper_tx">Transaction JSON:</label>
+          <textarea id="tamper_tx" placeholder='Transaction JSON, e.g. {"sender":"attacker","recipient":"pizzha.se","amount":9999}'></textarea>
+          </div>
+          
+          <div style="display:flex;flex-direction:column;gap:8px;">
+            <button id="tamper_submit" class="btn warn">Introduire une erreur</button>
+            <button id="broadcast_tampered" class="btn">Envoyer le Block (broadcast index)</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="status card">
+        <h2>Demo Status</h2>
+        <div class="status-row">
+          <div>Valitidé de la chaîne: <span id="valid_status" class="pill">—</span></div>
+          <div>Pending Tx: <span id="pending_count">0</span></div>
+          <div>Peers: <span id="peers_list" class="muted">(none)</span></div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <button id="authorize_responsable" class="btn warn">Autoriser responsable</button>
+          </div>
+        </div>
+        <div class="timeline" style="flex-wrap: wrap;">
+          <div class="step" id="step_tx">1. Tx created</div>
+          <div class="step" id="step_mine">2. Mined</div>
+          <div class="step" id="step_tamper">3. Tampered</div>
+          <div class="step" id="step_validate">4. Validated</div>
+          <div class="step" id="step_resolve">5. Resolved</div>
+          <div class="step" id="step_reset">6. Reset</div>
+        </div>
+      </section>
+
+      <section class="chain card" id="chain_section">
+        <h2>Blockchain</h2>
+        <div id="blocks" class="blocks">Chargement...</div>
+      </section>
+
+      <aside class="logs card">
+        <h2>Logs</h2>
+        <div id="logs">(no logs)</div>
+      </aside>
+    </main>
+
+    <div id="role_picker" style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.5);z-index:9999">
+      <div style="color: black; background:white;padding:28px;border-radius:10px;max-width:720px;width:90%;text-align:center">
+        <h2>Se connecter comme</h2>
+        <div id="role_buttons" style="color: black; display:flex;gap:12px;justify-content:center;margin-top:12px"></div>
+        <div style="margin-top:16px;color:#666;font-size:14px">Vous pouvez changer de rôle à tout moment depuis le bandeau.</div>
+      </div>
+    </div>
+
+    <footer class="footer">Pizzhashé demo — TP Blockchain</footer>
+
+    <script src="/static/app.js"></script>
+  </body>
+ </html>
