@@ -98,3 +98,16 @@ def test_resolve_keeps_chain_when_no_peer_longer(monkeypatch):
     data = app.test_client().get("/nodes/resolve").get_json()
     assert data["replaced"] is False
     assert data["length"] == 1
+
+
+# --- Persistance des pairs ---------------------------------------------------
+
+def test_peers_persist_across_restart(tmp_path):
+    path = str(tmp_path / "node.ylia")
+    chain = Blockchain(storage_path=path)
+    chain.register_peer("http://127.0.0.1:5001/")
+    chain.register_peer("http://127.0.0.1:5002")
+
+    # Un nouveau nœud rechargeant le même fichier retrouve ses pairs.
+    reloaded = Blockchain(storage_path=path)
+    assert reloaded.peers == {"http://127.0.0.1:5001", "http://127.0.0.1:5002"}
