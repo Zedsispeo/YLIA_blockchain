@@ -60,7 +60,12 @@ def create_app(
     @app.before_request
     def _root_redirect():
         if request.path == "/":
-            return redirect('/ui')
+            # Only redirect browser-like clients to the UI. Keep API clients/tests
+            # (werkzeug test client, scripts) receiving the JSON index.
+            ua = request.headers.get("User-Agent", "")
+            browser_signals = ("Mozilla", "Chrome", "Safari", "Edge", "Firefox")
+            if any(sig in ua for sig in browser_signals):
+                return redirect('/ui')
 
     @app.post("/tamper")
     def ui_tamper():
