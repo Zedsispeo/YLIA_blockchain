@@ -519,14 +519,50 @@ Ce projet est un **TP pédagogique** ; certains aspects sont volontairement simp
 
 ## Tests fonctionnels de la blockchain
 
+## Préconditions
+
+Il faut tout d'abord créer notre environnement de travail et relier les noeuds.
+
+**1. Copier le fichier d'environnement** (étape obligatoire — sans cela les identités demo et la clé du nœud C ne sont pas définies) :
+
+```shell
+cp .env.example .env
+```
+
+**2. Démarrer les conteneurs :**
+
+```shell
+docker compose up --build
+```
+
+3 noeuds sont alors créés, sur le même réseau, aux urls suivantes :
+`Noeud A` -> `http://node_a:5000`
+`Noeud B` -> `http://node_b:5001`
+`Noeud C` -> `http://node_c:5002`
+
+Sur la machine courante, ils sont présents aux urls suivantes :
+`Noeud A` -> `http://localhost:5000`
+`Noeud B` -> `http://localhost:5001`
+`Noeud C` -> `http://localhost:5002`
+
+Ainsi, leurs interfaces se trouvent aux urls locales, mais les noeuds ne se désignent que par leur URL sur le réseau.
+
+**3. Initialiser le réseau** (enregistre les pairs, agrée les autorités et mine le premier bloc) :
+
+```shell
+chmod +x scripts/init_network.sh
+./scripts/init_network.sh
+```
+
+Notre écosystème est maintenant prêt à travailler.
+
 ## 1. Création d'un bloc
 
 ### Étapes
 
 1. Se connecter avec un compte disposant du rôle **Responsable**.
-2. Effectuer l'autorisation du responsable.
-3. Ajouter une ou plusieurs transactions.
-4. Lancer le processus de minage.
+2. Ajouter une ou plusieurs transactions.
+3. Lancer le processus de minage.
 
 ### Résultat attendu
 

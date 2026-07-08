@@ -290,41 +290,6 @@ def resolve():
 # --------------------------------------------------------------------------- #
 # Demo helpers (front-end can register a demo 'responsable' identity)
 # --------------------------------------------------------------------------- #
-@bp.post("/demo/roles")
-def demo_roles_register():
-    """Register a demo role mapping: {"role": "responsable", "address": "YLIA..."}
-    Stored in app config under 'DEMO_ROLES'. This is for the demo UI only."""
-    payload = _json_body()
-    role = payload.get("role")
-    address = payload.get("address")
-    if not role or not address:
-        raise ApiError("'role' et 'address' sont requis")
-    # Persist demo roles to disk to survive reloader/multiple processes.
-    roles = _load_demo_roles()
-    roles[role] = address
-    _save_demo_roles(roles)
-    # also keep in-memory copy for this process
-    current_app.config["DEMO_ROLES"] = roles
-    return jsonify({"message": f"role {role} enregistré", "demo_roles": roles}), 201
-
-
-@bp.get("/demo/roles")
-def demo_roles_list():
-    roles = _load_demo_roles()
-    # mirror into config for this process
-    current_app.config["DEMO_ROLES"] = roles
-    return jsonify({"demo_roles": roles})
-
-
-def _load_demo_roles() -> dict:
-    return {
-        "customer1": "YLIA_demo_customer1",
-        "customer2": "YLIA_demo_customer2",
-        "responsable": "YLIA_demo_responsable",
-    }
-
-
-
 @bp.post("/blocks/receive")
 def receive_block():
     """Reçoit un bloc diffusé par un pair. Le bloc est REJETÉ (409) si son
@@ -418,3 +383,19 @@ def node_info():
             "pending": len(chain.pending_transactions),
         }
     )
+
+
+# Demo identities (from env) — utile pour front partagé entre instances
+@bp.get("/demo/roles")
+def demo_roles():
+    from ..config import DEMO_KEYS
+
+    result: dict[str, dict[str, str]] = {}
+    for role, priv in (DEMO_KEYS or {}).items():
+        try:
+            pub = crypto.public_key_from_private(priv)
+            addr = crypto.address_from_public_key(pub)
+            result[role] = {"private_key": priv, "public_key": pub, "address": addr}
+        except Exception:
+            continue
+    return jsonify({"demo_roles": result})

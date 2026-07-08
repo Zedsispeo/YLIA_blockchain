@@ -1,6 +1,7 @@
 """Constantes du réseau, partagées par tous les nœuds (→ même genesis)."""
 
 import os
+import json
 
 # Autorité racine : seule autorité au genesis, gère les agréments.
 # Clé déterministe pour la démo (tous les nœuds partagent la même racine sans
@@ -28,6 +29,14 @@ DATA_DIR = os.environ.get("YLIA_DATA_DIR", "data")
 def chain_file_for(port: int) -> str:
     """Chemin du fichier .ylia du nœud. YLIA_CHAIN_FILE force un chemin explicite."""
     return os.environ.get("YLIA_CHAIN_FILE") or os.path.join(DATA_DIR, f"ylia-{port}.ylia")
+
+# Demo identities (JSON string mapping role -> private_key), ex:
+# YLIA_DEMO_KEYS='{"customer1":"<priv1>","customer2":"<priv2>","responsable":"<priv3>"}'
+DEMO_KEYS_RAW = os.environ.get("YLIA_DEMO_KEYS", "{}")
+try:
+    DEMO_KEYS = json.loads(DEMO_KEYS_RAW)
+except Exception:
+    DEMO_KEYS = {}
 
 
 def key_file_for(port: int) -> str:

@@ -10,6 +10,21 @@ const DEMO_ROLES = [
 function storageKeyForRole(roleKey){ return `ylia_demo_identity_${roleKey}` }
 
 async function ensureDemoIdentities(){
+  // Try server-provided demo roles first (shared across frontends)
+  try{
+    const srv = await api('/demo/roles');
+    if(srv && srv.demo_roles){
+      const identities = {};
+      for(const k of Object.keys(srv.demo_roles)){
+        const v = srv.demo_roles[k];
+        const obj = {role:k, label:k, address:v.address, private_key:v.private_key, public_key:v.public_key};
+        try{ localStorage.setItem(storageKeyForRole(k), JSON.stringify(obj)); }catch(e){}
+        identities[k] = obj;
+      }
+      return identities;
+    }
+  }catch(e){ /* ignore and fallback to client-side generation */ }
+
   const identities = {};
   for(const r of DEMO_ROLES){
     const k = storageKeyForRole(r.key);
@@ -274,7 +289,13 @@ async function renderBalances(ids){
   }catch(e){ console.warn('failed to load balances', e); }
 }
 
-document.getElementById('refresh').addEventListener('click', refresh);
+document.getElementById('refresh').addEventListener('click', async () => {
+  await refresh();
+  try{
+    const ids = await ensureDemoIdentities();
+    await renderBalances(ids);
+  }catch(e){ console.warn('failed to refresh balances', e); }
+});
 
 document.getElementById('mine').addEventListener('click', async ()=>{
   try{
