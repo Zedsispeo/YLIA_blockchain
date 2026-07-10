@@ -1,611 +1,345 @@
-# YLIA — Blockchain de points de fidélité
+# YLIA — Blockchain de points de fidélité (Proof of Authority)
 
-YLIA est une **blockchain de points de fidélité** fonctionnant en **Proof of Authority (PoA)**.
-Seuls les **établissements agréés** peuvent émettre des transactions sur la chaîne : ils
-créditent (attribution de points) et débitent (consommation de points) les comptes des clients.
-Les clients, eux, ne font que **gagner** et **dépenser** leurs points.
-
-L'objectif est de fournir un **registre commun, infalsifiable et auditable** des points de
-fidélité, partagé entre plusieurs établissements, sans qu'aucun d'eux ne puisse falsifier le
-solde d'un client ou s'attribuer des points qu'il n'a pas le droit d'émettre.
-
----
-
-## 🚀 Démarrage rapide
-
-```bash
-# 1. Environnement virtuel + dépendances
-python3 -m venv .venv
-source .venv/bin/activate          # Windows : .venv\Scripts\activate
-pip install -r requirements.txt
-
-# 2. Lancer un nœud (API REST)
-python main.py --port 5000
-# → l'index auto-documenté des routes : curl http://127.0.0.1:5000/
-
-# 3. (Optionnel) lancer la démonstration complète à 3 nœuds
-python scripts/demo.py
-
-# 4. Lancer les tests
-pytest -q
-```
-
-> Le projet est une **API REST en Python pur** : aucune base de données, aucune
-> compilation. La cryptographie (ECDSA / SECP256k1) est réelle, via `ecdsa`. La
-> chaîne est **persistée sur disque** dans un fichier `.ylia` (un par nœud), donc
-> un nœud relancé **repart de son dernier état** et non du genesis.
-> *(Ce dépôt couvre le **backend / l'API** ; un client web le consomme séparément.)*
-
----
+YLIA est une blockchain minimale servant à gérer un programme de points de fidélité entre des établissements agréés et leurs clients. Elle est écrite en Python (Flask) et utilise un consensus **Proof of Authority (PoA)** plutôt qu'un Proof of Work : pas de minage coûteux en calcul, seuls des nœuds explicitement autorisés peuvent produire des blocs.
 
 ## Sommaire
 
-- [Démarrage rapide](#-démarrage-rapide)
-- [Principe général](#principe-général)
-- [Concepts clés](#concepts-clés)
-- [Le consensus Proof of Authority](#le-consensus-proof-of-authority)
-- [Modèle des points](#modèle-des-points)
-- [Acteurs et rôles](#acteurs-et-rôles)
-- [Gouvernance des agréments](#gouvernance-des-agréments)
-- [Cycle de vie d'une transaction](#cycle-de-vie-dune-transaction)
-- [Architecture on-chain / off-chain](#architecture-on-chain--off-chain)
-- [Garanties de sécurité](#garanties-de-sécurité)
-- [Glossaire](#glossaire)
-- [Structure du projet](#structure-du-projet)
-- [API REST](#api-rest)
-- [Démonstration des exigences du sujet](#démonstration-des-exigences-du-sujet)
-- [Choix techniques](#choix-techniques)
-- [Difficultés rencontrées](#difficultés-rencontrées)
-- [Limitations connues](#limitations-connues)
+- [Principes du projet](#principes-du-projet)
+- [Architecture du réseau](#architecture-du-réseau)
+- [Démarrer avec Docker](#démarrer-avec-docker)
+- [Scripts](#scripts)
+- [Endpoints de l'API](#endpoints-de-lapi)
+- [Démonstration : scénarios d'utilisation](#démonstration--scénarios-dutilisation)
+- [Variables d'environnement](#variables-denvironnement)
 
----
+## Principes du projet
 
-## Principe général
+### Proof of Authority (PoA)
 
-Dans un programme de fidélité classique, chaque enseigne gère ses points dans sa propre base
-de données privée. Le client doit faire confiance à l'enseigne sur son solde, et les points ne
-circulent pas d'une enseigne à l'autre.
+Contrairement à un Proof of Work (Bitcoin) où n'importe quel nœud peut miner en résolvant un puzzle cryptographique, YLIA repose sur une **liste blanche d'autorités agréées** :
 
-YLIA remplace ces bases isolées par **un seul registre partagé** : la blockchain. Tous les
-établissements agréés lisent et écrivent dans ce même registre. Chaque opération (attribution
-ou consommation de points) est une **transaction signée**, inscrite dans un bloc, et vérifiable
-par tous.
+- Une **autorité racine** (`root`) existe dès le bloc genesis. C'est la seule identité de confiance au démarrage du réseau.
+- Seule la racine peut **agréer** (`register`) ou **révoquer** (`revoke`) une autre identité comme autorité. Ces agréments sont eux-mêmes des transactions inscrites dans la chaîne.
+- Seule une adresse figurant dans la liste des autorités courantes peut :
+  - **miner un bloc** (agir comme validateur) ;
+  - **créditer/débiter** des points de fidélité (transactions `credit` / `debit`).
+- Un agrément inscrit dans un bloc ne prend effet **qu'à partir du bloc suivant** — on ne peut pas s'auto-agréer et miner dans la foulée du même bloc.
+- Chaque bloc est signé (ECDSA / SECP256k1) par l'autorité qui l'a produit. Un bloc dont le validateur n'est pas (ou plus) agréé, ou dont la signature est invalide, est rejeté par tous les autres nœuds : c'est le cœur du consensus.
 
-La particularité de YLIA est qu'il ne s'agit **pas** d'une blockchain publique ouverte à tous :
-c'est un réseau **à permission**. On ne peut pas devenir émetteur sans avoir été explicitement
-agréé. C'est le rôle du **Proof of Authority**.
+### Ce que garantit la chaîne
 
----
+- **Intégrité** : chaque bloc référence le hash du précédent (`previous_hash`) ; modifier une transaction passée change le hash du bloc et casse la chaîne — détectable via `/validate` ou `/chain` (champs `is_consistent` / `is_valid_signature`).
+- **Consensus PoA** : un bloc produit par un nœud non agréé, ou un solde débité au-delà du disponible, est rejeté à l'ajout (`add_block`) comme à la validation complète de la chaîne.
+- **Anti-rejeu** : une transaction ne peut être acceptée deux fois (signature déjà vue) et un nonce n'est utilisable qu'une fois par émetteur.
+- **Résolution de conflits** : entre nœuds pairs, la chaîne valide la plus longue l'emporte (`/nodes/resolve`), comme dans le modèle Nakamoto classique.
 
-## Concepts clés
+### Rôles métier
 
-| Concept | Description |
+| Rôle | Ce qu'il peut faire |
 |---|---|
-| **Point** | Unité de fidélité. Monnaie **universelle** partagée par tout le réseau. |
-| **Client** | Bénéficiaire des points. Possède un solde et un compte (adresse) sur la chaîne. |
-| **Établissement agréé** | Acteur autorisé à émettre des transactions (créditer/débiter les clients). C'est aussi une **autorité** du consensus. |
-| **Autorité (validateur)** | Nœud habilité à produire et valider les blocs. Dans YLIA, les établissements agréés sont les autorités. |
-| **Transaction** | Opération signée : attribution (`+points`) ou consommation (`-points`) sur le compte d'un client. |
-| **Bloc** | Lot de transactions validé et chaîné au précédent. |
-| **Registre d'agréments** | Smart contract qui tient la liste blanche des établissements autorisés. |
+| **Racine (root)** | Agréer/révoquer des établissements ; miner (elle est autorité par défaut). |
+| **Établissement agréé** | Miner des blocs ; créditer/débiter des points à des clients. |
+| **Client** | Détenir un solde de points, consulter son solde. Ne signe pas de transaction lui-même dans le flux de démo. |
+| **Nœud non agréé** | Peut lire la chaîne et proposer des transactions, mais toute tentative de minage ou d'émission de points est rejetée (403/400). |
 
----
+## Architecture du réseau
 
-## Le consensus Proof of Authority
+Le `docker-compose.yaml` fourni démarre un réseau à 3 nœuds :
 
-Le **Proof of Authority (PoA)** est un mécanisme de consensus où la confiance ne repose pas sur
-la puissance de calcul (comme le Proof of Work / minage) ni sur la mise de jetons (comme le
-Proof of Stake), mais sur **l'identité connue et approuvée** des validateurs.
-
-Dans YLIA :
-
-- **Seuls les établissements agréés sont des autorités.** Ce sont eux, et eux seuls, qui
-  produisent les blocs et émettent les transactions.
-- Chaque autorité possède une **identité on-chain** (une paire de clés cryptographiques) qui
-  a été **explicitement enregistrée** dans le registre d'agréments.
-- Un acteur non agréé ne peut **ni émettre une transaction valide, ni produire un bloc** : ses
-  messages sont rejetés par le réseau car son adresse n'est pas dans la liste blanche.
-
-### Pourquoi le PoA pour ce projet ?
-
-- **Pas de minage** : inutile de gaspiller de l'énergie, les validateurs sont déjà identifiés
-  et de confiance.
-- **Transactions rapides et quasi gratuites** : adapté à un usage commercial fréquent
-  (passage en caisse, attribution de points en temps réel).
-- **Responsabilité** : chaque bloc et chaque transaction est signé par un acteur **nommément
-  identifié**. En cas d'abus, on sait précisément qui en est l'auteur.
-- **Contrôle d'accès natif** : il est impossible de créer ou détruire des points sans être un
-  établissement agréé.
-
----
-
-## Modèle des points
-
-YLIA utilise un **point universel partagé** :
-
-- Il existe **une seule monnaie de points** commune à l'ensemble du réseau.
-- Un client qui gagne des points chez l'établissement **A** peut les dépenser chez
-  l'établissement **B**, dès lors que B est lui aussi agréé.
-- Le solde d'un client est **global** : il n'est pas cloisonné par établissement.
-
-### Création et destruction des points
-
-- **Attribution (crédit)** : un établissement agréé attribue des points à un client (ex. après
-  un achat). C'est l'équivalent d'une *création* (mint) de points sur le compte du client.
-- **Consommation (débit)** : un établissement agréé débite des points du compte d'un client
-  lorsqu'il les échange contre une récompense. C'est l'équivalent d'une *destruction* (burn).
-
-### Ce que les clients **peuvent** faire
-
-- ✅ **Gagner** des points (crédités par un établissement agréé).
-- ✅ **Dépenser** des points (débités par un établissement agréé).
-
-### Ce que les clients **ne peuvent pas** faire
-
-- ❌ Émettre eux-mêmes des transactions (seuls les établissements le peuvent).
-- ❌ Se transférer des points entre clients (pas de transfert peer-to-peer).
-- ❌ Créer des points de leur propre initiative.
-
-> Toute variation du solde d'un client résulte donc **obligatoirement** d'une transaction
-> signée par un établissement agréé.
-
----
-
-## Acteurs et rôles
-
-| Acteur | Peut émettre une transaction ? | Peut valider un bloc ? | Détient un solde de points ? |
-|---|:---:|:---:|:---:|
-| **Établissement agréé** | ✅ Oui | ✅ Oui (autorité) | — |
-| **Client** | ❌ Non | ❌ Non | ✅ Oui |
-| **Autorité racine / gouvernance** | ✅ (gestion des agréments) | ✅ | — |
-| **Acteur non agréé** | ❌ Non | ❌ Non | — |
-
----
-
-## Gouvernance des agréments
-
-La liste des établissements autorisés est gérée **on-chain** par un **smart contract de
-registre** (liste blanche).
-
-Ce contrat est la source de vérité du réseau : avant d'accepter une transaction ou un bloc, les
-nœuds vérifient que son émetteur figure bien dans le registre **avec un statut actif**.
-
-Le registre prend en charge :
-
-- **L'ajout** d'un établissement (octroi de l'agrément) → son adresse devient émettrice/validatrice valide.
-- **La révocation** d'un établissement (retrait de l'agrément) → ses futures transactions et blocs
-  sont rejetés par le réseau.
-- **La consultation** de l'état d'un établissement (agréé / révoqué) par n'importe quel nœud.
-
-Les opérations sur le registre sont elles-mêmes des transactions on-chain : l'historique des
-agréments et des révocations est donc **traçable et auditable** comme le reste de la chaîne.
-
-> **À préciser ultérieurement :** la politique d'administration du registre (autorité racine
-> unique, vote de consortium, multi-signatures…). Le présent document décrit le *mécanisme* de
-> liste blanche, indépendamment de la politique retenue pour la modifier.
-
----
-
-## Cycle de vie d'une transaction
-
-Exemple : un client gagne 50 points lors d'un achat.
-
-```
-1. L'établissement agréé prépare une transaction :
-   { type: "credit", client: <adresse_client>, montant: 50, etablissement: <adresse_etab> }
-
-2. L'établissement SIGNE la transaction avec sa clé privée.
-
-3. La transaction est diffusée sur le réseau.
-
-4. Les autorités VÉRIFIENT :
-     - la signature est valide ;
-     - l'émetteur est bien dans le registre d'agréments (statut actif) ;
-     - (pour un débit) le client dispose d'un solde suffisant.
-
-5. La transaction valide est intégrée dans un BLOC par une autorité.
-
-6. Le bloc est chaîné au registre. Le solde du client est mis à jour.
-```
-
-Une transaction invalide (signature incorrecte, émetteur non agréé, solde insuffisant) est
-**rejetée** et n'est jamais inscrite dans la chaîne.
-
----
-
-## Architecture on-chain / off-chain
-
-YLIA répartit l'information en deux couches, selon une règle simple :
-
-> **Les autorisations et les mouvements de points vivent sur la blockchain.
-> Les identités nominatives et les métadonnées vivent dans une base de données off-chain.**
-
-### Couche on-chain (la blockchain)
-
-- Les **soldes** de points (rattachés à des **adresses pseudonymes**).
-- Les **transactions** (attributions / consommations de points).
-- Le **registre d'agréments** des établissements.
-- Les **blocs** et le chaînage.
-
-### Couche off-chain (base de données)
-
-- Le **lien entre une identité réelle et son adresse pseudonyme** on-chain.
-- Les **métadonnées** non essentielles au consensus.
-
-Cette séparation permet de garder la chaîne **légère, pseudonyme et durable**, tout en gérant
-les données sensibles ou volumineuses dans un système classique mieux adapté (et plus facile à
-mettre en conformité, par ex. droit à l'effacement).
-
----
-
-## Garanties de sécurité
-
-- **Émission contrôlée** — Aucun point ne peut être créé ou détruit en dehors d'une transaction
-  signée par un établissement agréé.
-- **Non-falsifiabilité** — Une fois un bloc chaîné, modifier une transaction passée invaliderait
-  toute la chaîne suivante.
-- **Imputabilité** — Chaque transaction et chaque bloc est signé par une autorité identifiée :
-  toute opération est attribuable à son auteur.
-- **Révocabilité** — Un établissement qui perd son agrément est immédiatement écarté du réseau
-  via le registre, sans interrompre la chaîne.
-- **Transparence auditable** — L'intégralité des mouvements de points et des agréments est
-  consultable et vérifiable par les participants.
-
----
-
-## Glossaire
-
-- **PoA (Proof of Authority)** — Consensus fondé sur l'identité approuvée des validateurs plutôt
-  que sur le calcul ou la mise.
-- **Autorité / Validateur** — Nœud habilité à produire et valider les blocs. Ici : un
-  établissement agréé.
-- **Liste blanche** — Ensemble des adresses autorisées, tenu par le registre d'agréments.
-- **Crédit / Débit** — Attribution / consommation de points sur le compte d'un client.
-- **On-chain / Off-chain** — Données stockées sur la blockchain / dans une base externe.
-- **Adresse pseudonyme** — Clé publique identifiant un compte sur la chaîne, sans révéler
-  l'identité réelle.
-
----
-
-## Structure du projet
-
-```
-YLIA_blockchain/
-├── main.py                 # point d'entrée d'un nœud (CLI : --port, --node-key, --new-key, --chain-file)
-├── requirements.txt        # dépendances (Flask, ecdsa, requests, pytest)
-├── README.md
-├── src/ylia/
-│   ├── crypto.py           # cryptographie réelle : clés, signatures ECDSA, adresses
-│   ├── transaction.py      # transaction signée (credit / debit / register / revoke)
-│   ├── block.py            # bloc en 3 lanes (toplane/midlane/botlane) + hash SHA-256 déterministe
-│   ├── registry.py         # registre d'agréments (liste blanche des autorités PoA)
-│   ├── blockchain.py       # chaîne, minage, validation, soldes, résolution de conflits, persistance
-│   ├── storage.py          # sauvegarde/chargement de la chaîne dans un fichier .ylia (écriture atomique)
-│   ├── node.py             # communication réseau entre nœuds (pairs, diffusion)
-│   ├── config.py           # racine, genesis, ports, chemin du fichier .ylia
-│   └── api/                # couche HTTP (séparée du cœur, donc testable)
-│       ├── __init__.py     #   factory create_app()
-│       ├── routes.py       #   Blueprint : toutes les routes
-│       └── errors.py       #   gestion d'erreurs JSON cohérente
-├── src/model/              # schéma du bloc : toplane (en-tête), midlane (signature), botlane (transactions)
-├── scripts/
-│   ├── demo.py             # démonstration automatisée à 3 nœuds (les 5 points du sujet)
-│   └── run_two_nodes.sh    # lance 2 nœuds pour des essais manuels
-└── tests/                  # 58 tests pytest (cœur, consensus, réorg, réseau, API)
-```
-
-La **séparation cœur / transport** est volontaire : le domaine (`blockchain.py`,
-`crypto.py`, …) ne dépend pas de Flask et se teste sans serveur ; la couche `api/`
-ne fait que traduire HTTP ↔ domaine. La factory `create_app(blockchain=…)` permet
-à chaque test de partir d'une blockchain neuve.
-
-### Structure d'un bloc (exigence du sujet)
-
-Le bloc suit le schéma de `src/model/`, organisé en **trois « lanes »** :
-
-- **`toplane`** (en-tête) : `version`, `index`, `timestamp`, `previous_hash`, `merkle_root`, `txcount`, `author`.
-- **`midlane`** (couche de signature) : `validator_pubkey`, `signature`, `hash`.
-- **`botlane`** (corps) : `transactions`.
-
-| Champ | Lane | Rôle |
+| Service | Port | Identité |
 |---|---|---|
-| `version` | top | version du format de bloc |
-| `index` | top | position dans la chaîne (0 = genesis) |
-| `timestamp` | top | horodatage de production |
-| `previous_hash` | top | hash du bloc précédent (chaînage) |
-| `merkle_root` | top | racine de Merkle des transactions (l'en-tête s'engage sur le corps) |
-| `txcount` | top | nombre de transactions du bloc |
-| `author` (= `validator`) | top | adresse de l'autorité qui a produit le bloc |
-| `validator_pubkey` | mid | clé publique du validateur (liée à `author`) |
-| `signature` | mid | signature ECDSA du `hash` par le validateur |
-| `hash` | mid | **SHA-256 déterministe** de l'en-tête (`toplane`, JSON trié) |
-| `transactions` | bot | liste des transactions incluses |
+| `node_a` | 5000 | **Racine** — clé fixe déterministe, seule autorité au genesis. |
+| `node_b` | 5001 | Génère et persiste sa propre identité au premier démarrage (`data/node_b/ylia-5001.key`). Doit être agréée par la racine avant de pouvoir miner. |
+| `node_c` | 5002 | Identité d'établissement explicite fournie via `.env` (`NODE_C_KEY`), stable entre redémarrages. |
 
-> Le `hash` porte sur le `toplane`, qui s'engage sur les transactions via `merkle_root` :
-> toute modification d'une transaction change la racine, donc le hash → falsification détectée.
-> `author`, `validator_pubkey` et `signature` forment le **champ de consensus PoA**.
+Chaque nœud persiste sa chaîne dans un fichier `.ylia` (JSON) sous `data/<node>/`, monté en volume Docker afin de survivre aux redémarrages des conteneurs.
 
----
+## Démarrer avec Docker
 
-## API REST
+### Pré-requis
 
-### Endpoints exigés par le sujet
+- Docker et Docker Compose.
+- Un fichier `.env` à la racine (copier `.env.example`) :
+
+```bash
+cp .env.example .env
+```
+
+Le fichier `.env` fournit :
+- `NODE_C_KEY` : la clé privée fixe de `node_c`.
+- `YLIA_DEMO_KEYS` : trois identités de démo partagées (`customer1`, `customer2`, `responsable`) — utile pour qu'un front-end affiche les mêmes comptes quel que soit le nœud interrogé.
+
+### Lancer le réseau
+
+```bash
+docker compose up --build
+```
+
+Cela démarre les 3 nœuds (`node_a`, `node_b`, `node_c`) sur les ports 5000/5001/5002, chacun avec son propre volume de données sous `./data/`.
+
+### Initialiser le réseau
+
+Une fois les conteneurs démarrés, le réseau est vierge : les nœuds ne se connaissent pas encore et `node_b`/`node_c` ne sont pas encore des autorités. Le script `scripts/init_network.sh` automatise ce bootstrap (voir section suivante) :
+
+```bash
+./scripts/init_network.sh
+```
+
+### Vérifier l'état d'un nœud
+
+```bash
+curl http://localhost:5000/
+curl http://localhost:5000/health
+curl http://localhost:5000/chain
+```
+
+### Arrêter le réseau
+
+```bash
+docker compose down
+```
+
+(Les données restent dans `./data/` grâce aux volumes montés ; supprimer ce dossier repart d'une chaîne vierge.)
+
+## Scripts
+
+### `scripts/init_network.sh`
+
+Bootstrap complet d'un réseau à 3 nœuds (pensé pour être lancé après `docker compose up`) :
+
+1. Attend que les 3 nœuds répondent sur `/health`.
+2. Enregistre chaque nœud comme pair des deux autres (`/nodes/register`), via les noms d'hôtes Docker (`node_a`, `node_b`, `node_c`).
+3. Récupère les adresses de `node_b`, `node_c`, et de l'identité de démo `responsable`.
+4. Agrée ces trois adresses comme autorités depuis `node_a` (la racine).
+5. Mine un bloc sur `node_a` pour rendre ces agréments effectifs.
+6. Fait résoudre les conflits sur `node_b` et `node_c` pour qu'ils synchronisent le nouveau bloc.
+
+Variables d'environnement optionnelles : `HOST`, `A_PORT`, `B_PORT`, `C_PORT`, `TIMEOUT`.
+
+### `scripts/run_two_nodes.sh`
+
+Démarrage rapide en local (hors Docker) de deux nœuds Python pour une démo manuelle : `node A` (racine, port 5000) et `node B` (port 5001). Ctrl-C arrête les deux processus.
+
+```bash
+./scripts/run_two_nodes.sh
+```
+
+### `scripts/demo.py`
+
+Démonstration de bout en bout, entièrement automatisée (démarre elle-même 3 nœuds locaux) qui prouve successivement :
+
+1. **Chaînage** : minage de blocs et vérification que `previous_hash` de chaque bloc correspond bien au hash du précédent.
+2. **Transactions** : agrément d'un établissement, crédit puis débit de points, vérification du solde final.
+3. **Falsification** : modification du montant d'une transaction dans un bloc déjà miné → la chaîne devient invalide (`/validate`).
+4. **Résolution de conflits** : un nœud en retard adopte la chaîne plus longue et valide d'un pair, et les deux convergent vers les mêmes hashes.
+5. **Consensus PoA** : une transaction émise par une identité non agréée est rejetée (400), tout comme un bloc miné par un nœud non agréé (403) ou signé par un validateur non agréé.
+
+```bash
+python scripts/demo.py
+```
+
+## Endpoints de l'API
+
+Le catalogue complet est aussi consultable en direct via `GET /` sur n'importe quel nœud.
+
+### Index / santé
 
 | Méthode | Route | Description |
 |---|---|---|
-| `GET`  | `/chain` | la chaîne complète + sa longueur |
-| `POST` | `/transactions/new` | soumettre une transaction signée |
-| `GET`  | `/mine` | miner un bloc contenant les transactions en attente |
+| GET | `/` | Catalogue des endpoints + informations sur le nœud interrogé. |
+| GET | `/health` | Sonde de vivacité (liveness). |
+| GET | `/node` | Informations détaillées sur le nœud (adresse, autorité, racine, pairs, longueur de chaîne, mempool). |
+
+### Chaîne et transactions
+
+| Méthode | Route | Description |
+|---|---|---|
+| GET | `/chain` | La chaîne complète, avec pour chaque bloc les indicateurs `is_consistent` et `is_valid_signature`. |
+| POST | `/transactions/new` | Soumettre une transaction (`credit` ou `debit`), signée côté client ou côté serveur. |
+| GET | `/mine` | Miner un bloc avec les transactions en attente (réservé aux autorités agréées). |
+| GET | `/pending` | Lister les transactions en attente (mempool). |
+| DELETE | `/transactions/pending` | Vider le mempool (opération d'exploitation). |
+| GET | `/validate` | Indique si la chaîne est valide, avec la raison en cas d'invalidité. |
 
 ### Réseau multi-nœuds
 
 | Méthode | Route | Description |
 |---|---|---|
-| `POST` | `/nodes/register` | enregistrer des pairs (`{"nodes": ["http://…:5001"]}`) |
-| `GET`  | `/nodes` | lister les pairs |
-| `GET`  | `/nodes/resolve` | **résolution de conflits** (plus longue chaîne valide) |
+| POST | `/nodes/register` | Enregistrer des pairs : `{"nodes": ["http://..."]}`. |
+| GET | `/nodes` | Lister les pairs connus. |
+| GET | `/nodes/resolve` | Résolution de conflits : adopte la chaîne la plus longue et valide parmi les pairs. |
+| POST | `/blocks/receive` | Recevoir un bloc diffusé par un pair (rejeté avec 409 si le consensus est invalide). |
 
-### Spécifique YLIA (points de fidélité / PoA)
-
-| Méthode | Route | Description |
-|---|---|---|
-| `GET`  | `/authorities` | liste blanche des autorités agréées |
-| `POST` | `/authorities/register` | agréer un établissement (`{"address": "YLIA…"}`) |
-| `POST` | `/authorities/revoke` | révoquer un établissement |
-| `GET`  | `/balance/<address>` | solde d'un compte |
-| `GET`  | `/balances` | tous les soldes |
-| `GET`    | `/pending` | transactions en attente |
-| `DELETE` | `/transactions/pending` | vider le mempool (exploitation) |
-| `GET`    | `/validate` | la chaîne est-elle valide ? (+ raison si non) |
-| `GET`    | `/wallet/new` | générer une paire de clés |
-| `GET`    | `/node` | informations sur le nœud courant |
-
-### Utilitaires
+### Autorités (PoA)
 
 | Méthode | Route | Description |
 |---|---|---|
-| `GET` | `/` | index auto-documenté (catalogue des routes + état du nœud) |
-| `GET` | `/health` | sonde de vivacité |
+| GET | `/authorities` | Liste blanche des autorités agréées + adresse racine. |
+| POST | `/authorities/register` | Agréer un établissement : `{"address": "YLIA..."}` (racine uniquement). |
+| POST | `/authorities/revoke` | Révoquer un établissement : `{"address": "YLIA..."}` (racine uniquement). |
 
-Toutes les erreurs sont renvoyées en JSON : `{"error": "<message>"}` avec le bon
-code HTTP (400 validation, 403 nœud non agréé au minage, 404, 405, 500).
+### Soldes / portefeuille
 
-### Format d'une transaction
+| Méthode | Route | Description |
+|---|---|---|
+| GET | `/balance/<address>` | Solde confirmé et disponible (mempool inclus) d'un compte. |
+| GET | `/balances` | Tous les soldes connus. |
+| GET | `/wallet/new` | Générer une nouvelle paire de clés (clé privée, clé publique, adresse). |
 
-Les champs du sujet (`sender`, `recipient`, `amount`) sont présents et complétés
-par le modèle métier YLIA :
+### Démo
 
-```jsonc
-{
-  "type": "credit",            // credit | debit | register | revoke
-  "sender": "YLIA…",           // adresse de l'émetteur (autorité signataire)
-  "recipient": "YLIA…",        // client (credit/debit) ou établissement (register/revoke)
-  "amount": 50,                 // points (0 pour register/revoke)
-  "public_key": "…",           // clé publique de l'émetteur
-  "timestamp": 1718000000.0,
-  "nonce": "facture-42",        // optionnel : identifiant d'opération (idempotence)
-  "signature": "…"             // signature ECDSA de tout ce qui précède
-}
-```
+| Méthode | Route | Description |
+|---|---|---|
+| GET | `/demo/roles` | Identités de démo partagées entre nœuds (`customer1`, `customer2`, `responsable`), dérivées de `YLIA_DEMO_KEYS`. |
 
-Pour faciliter les essais, `POST /transactions/new` accepte aussi `{"private_key": "…"}`
-(signature côté serveur) ou `{"use_root": true}` (signé par la racine). En production,
-la signature se ferait **côté client** : le serveur ne verrait jamais de clé privée.
-La **vérification** des signatures reste rigoureuse dans tous les cas — c'est elle qui
-fait respecter le PoA.
+### Format des transactions (`POST /transactions/new`)
 
-Le champ **`nonce`** est facultatif : s'il est fourni, deux transactions du même
-émetteur ne peuvent pas partager le même nonce (anti-rejeu / idempotence). Utile
-pour qu'une re-soumission accidentelle (ou une double diffusion) ne crédite/débite
-pas deux fois.
+Trois façons de fournir une transaction :
 
-#### Exemples cURL
+1. **Pré-signée côté client** : fournir `public_key` + `signature` (et optionnellement `sender`).
+2. **Signature côté serveur avec une clé fournie** : fournir `private_key` (la clé publique et l'adresse sont recalculées serveur).
+3. **Mode démo avec la racine** : `use_root: true` fait signer la transaction avec la clé de la racine.
 
-```bash
-# Créditer un client (signé par la racine, pour la démo) puis miner
-curl -X POST localhost:5000/transactions/new \
+Champs communs : `type` (`credit` ou `debit`), `recipient`, `amount`, `nonce` (optionnel, anti-rejeu).
+
+## Démonstration : scénarios d'utilisation
+
+Une fois le réseau démarré et initialisé (voir [Démarrer avec Docker](#démarrer-avec-docker)), voici des scénarios concrets pour prendre en main le projet — à la main via `curl`/l'interface `/ui`, ou directement inspirés des tests fonctionnels du projet.
+
+### Préconditions
+
+1. **Copier le fichier d'environnement** (obligatoire — sans cela les identités de démo et la clé de `node_c` ne sont pas définies) :
+
+   ```bash
+   cp .env.example .env
+   ```
+
+2. **Démarrer les conteneurs :**
+
+   ```bash
+   docker compose up --build
+   ```
+
+   Trois nœuds sont créés sur le même réseau Docker, joignables entre eux par leur nom d'hôte, et exposés localement :
+
+   | Nœud | URL interne (réseau Docker) | URL locale |
+   |---|---|---|
+   | A (racine) | `http://node_a:5000` | `http://localhost:5000` |
+   | B | `http://node_b:5001` | `http://localhost:5001` |
+   | C | `http://node_c:5002` | `http://localhost:5002` |
+
+   Les nœuds ne se désignent entre eux que par leur URL réseau Docker (`node_a`, `node_b`, `node_c`), jamais par `localhost`.
+
+3. **Initialiser le réseau** (enregistre les pairs, agrée les autorités, mine le premier bloc) :
+
+   ```bash
+   chmod +x scripts/init_network.sh
+   ./scripts/init_network.sh
+   ```
+
+L'écosystème est alors prêt.
+
+### 1. Création d'un bloc
+
+**Étapes**
+
+1. Récupérer l'identité de démo `responsable` (agréée comme autorité par `init_network.sh`) :
+
+   ```bash
+   curl http://localhost:5000/demo/roles
+   ```
+
+2. Ajouter une transaction signée par le `responsable` :
+
+   ```bash
+   curl -X POST http://localhost:5000/transactions/new \
      -H 'Content-Type: application/json' \
-     -d '{"type":"credit","recipient":"YLIAalice","amount":50,"use_root":true}'
-curl localhost:5000/mine
-curl localhost:5000/balance/YLIAalice      # -> 50
+     -d '{"type":"credit","recipient":"<adresse_client>","amount":50,"private_key":"<clé_privée_responsable>"}'
+   ```
 
-# Agréer un établissement
-curl -X POST localhost:5000/authorities/register \
-     -H 'Content-Type: application/json' -d '{"address":"YLIAetab1"}'
-```
+3. Miner :
 
----
+   ```bash
+   curl http://localhost:5000/mine
+   ```
 
-## Démonstration des exigences du sujet
+**Résultat attendu** : ✅ un nouveau bloc est créé et ajouté à la chaîne (visible via `curl http://localhost:5000/chain`).
 
-Le script `python scripts/demo.py` lance trois nœuds et **prouve les cinq points
-de bout en bout** (y compris la détection de falsification et le rejet d'un nœud
-non agréé). Chaque point est aussi couvert par des tests :
+### 2. Vérification de la détection d'erreurs
 
-| Exigence du sujet | Démo | Tests |
-|---|---|---|
-| Création d'un bloc + chaînage cohérent | §1 | `test_block_and_chaining.py` |
-| Ajout de transactions puis minage | §2 | `test_transactions_and_mining.py` |
-| Détection d'une chaîne falsifiée | §3 | `test_falsification.py` |
-| Résolution de conflits (convergence) | §4 | `test_conflict_resolution.py` |
-| Validité du consensus (tx ET bloc non agréé rejetés) | §5 | `test_consensus_poa.py`, `test_network.py` |
+**Étapes**
 
-Essais manuels : `scripts/run_two_nodes.sh` lance deux nœuds (ports 5000/5001) ;
-on peut alors miner sur l'un (`curl localhost:5000/mine`), enregistrer l'autre
-comme pair, puis déclencher `curl localhost:5001/nodes/resolve`.
+1. Créer un nouveau bloc (scénario 1).
+2. Injecter une transaction frauduleuse dans un bloc déjà miné (index ≥ 1), par exemple via l'endpoint de démo `/tamper` de l'interface (`/ui`) :
 
----
+   ```json
+   {
+     "index": 1,
+     "transaction": { "sender": "attacker", "recipient": "pizzha.se", "amount": 9999 }
+   }
+   ```
 
-## Choix techniques
+3. Demander la validation de la chaîne :
 
-- **Consensus : Proof of Authority** — justifié en détail plus haut. En une phrase :
-  un registre de fidélité est un réseau *à permission* (seuls des établissements
-  agréés écrivent), donc le PoA — fondé sur l'identité approuvée des validateurs —
-  est le choix naturel : pas de minage coûteux, transactions instantanées, et chaque
-  bloc est imputable à une autorité nommée.
-- **Cryptographie réelle (ECDSA / SECP256k1)** — chaque transaction et chaque bloc est
-  signé ; la vérification lie la clé publique à l'adresse de l'émetteur, ce qui empêche
-  l'usurpation. Signatures déterministes (RFC 6979) pour un genesis reproductible.
-- **Pas de base de données** — l'état (soldes, autorités) n'est jamais stocké : il est
-  intégralement *dérivé* en rejouant les transactions de la chaîne, à la manière d'un
-  smart contract. Seule la **chaîne** est persistée.
-- **Persistance fichier (`.ylia`)** — la chaîne est sauvegardée dans un fichier `.ylia`
-  (JSON, un fichier par nœud : `data/ylia-<port>.ylia`) après chaque bloc miné, reçu ou
-  adopté lors d'une résolution de conflits. L'écriture est **atomique** (fichier temporaire
-  + `fsync` + `os.replace`) : un crash en cours d'écriture ne corrompt jamais le fichier.
-  Au démarrage, la chaîne stockée n'est rechargée que si elle est **intégralement valide**
-  (genesis authentique, chaînage, hash, signatures, agréments, soldes) ; sinon le nœud
-  repart du genesis.
-- **Résolution de conflits** — règle de la *plus longue chaîne valide* : un nœud n'adopte
-  une chaîne pair que si elle est plus longue **et** entièrement valide (chaînage, hash,
-  signatures, agréments, soldes). Une chaîne plus longue mais falsifiée est rejetée.
+   ```bash
+   curl http://localhost:5000/validate
+   curl http://localhost:5000/chain
+   ```
 
----
+**Résultat attendu** : ✅ le système détecte l'altération : `/validate` renvoie `valid: false` avec la raison, et dans `/chain` le bloc concerné (ex. index `1`) a `is_consistent`/`is_valid_signature` à `false`.
 
-## Difficultés rencontrées
+### 3. Résolution de conflits — Cas n°1 (le pair a une chaîne plus courte)
 
-- **Genesis identique sur tous les nœuds.** La résolution de conflits compare des chaînes :
-  il faut donc que le bloc genesis soit *bit-à-bit* identique partout. Résolu en figeant
-  l'horodatage du genesis et en utilisant des signatures déterministes (RFC 6979) et une
-  racine dérivée d'une graine partagée.
-- **Hash déterministe.** Un `dict` Python n'a pas d'ordre de sérialisation garanti d'une
-  exécution à l'autre. Le hash est calculé sur du JSON **trié** (`sort_keys=True`,
-  séparateurs compacts) pour être strictement reproductible.
-- **Falsification « réparée ».** Recalculer le hash d'un bloc modifié ne suffit pas à
-  tromper la chaîne : la signature de la transaction ne correspond plus à son contenu et
-  le `previous_hash` du bloc suivant est rompu. La validation vérifie les trois (hash,
-  signatures, chaînage).
-- **Lier identité et autorisation.** Un attaquant pourrait signer une transaction avec sa
-  propre clé en se déclarant émetteur d'un autre. On vérifie donc systématiquement que
-  `adresse(clé_publique) == sender` avant d'accepter une signature.
-- **Bootstrap des autorités.** Pour pouvoir agréer le premier établissement, il faut une
-  autorité initiale : la *racine*, présente dès le genesis. Pour une démo locale sans
-  échange de secret, sa clé est déterministe (à remplacer par une vraie clé en production).
-- **Double-dépense dans le mempool.** Un débit est validé non seulement sur le solde
-  confirmé mais aussi en tenant compte des transactions déjà en attente, pour éviter de
-  débiter deux fois le même solde avant minage.
-- **Mempool après réorganisation.** Quand un nœud adopte une chaîne plus longue, une
-  transaction restée en attente peut être devenue invalide (débit qui n'est plus
-  financé, émetteur révoqué). Une première version se contentait de retirer les
-  transactions déjà inscrites ; résultat : une transaction devenue invalide bloquait
-  tout minage. Désormais, après adoption d'une chaîne, le mempool est **entièrement
-  revalidé** contre le nouvel état (`_revalidate_pending`) et les transactions devenues
-  invalides sont purgées.
+**Étapes**
 
----
+1. Démarrer deux nœuds locaux, ports `5000` et `5001` (`./scripts/run_two_nodes.sh`).
+2. Sur le nœud `5000`, enregistrer `5001` comme pair : `POST /nodes/register` avec `{"nodes":["http://127.0.0.1:5001"]}`.
+3. Sur le nœud `5000`, miner un bloc (`GET /mine`).
+4. Sur le nœud `5001`, miner deux blocs.
+5. Depuis le nœud `5001`, lancer la résolution : `GET /nodes/resolve`.
 
-## Limitations connues
+**Résultat attendu** : ✅ la chaîne du nœud `5001` est conservée, car elle est déjà la plus longue et valide.
 
-Ce projet est un **TP pédagogique** ; certains aspects sont volontairement simplifiés :
+### 4. Résolution de conflits — Cas n°2 (le pair a une chaîne plus longue)
 
-- **Clé racine de démo.** La clé de l'autorité racine est déterministe (graine fixe)
-  pour que tous les nœuds partagent le même genesis sans échange de secret. En
-  production, elle serait générée aléatoirement et protégée (HSM, multi-signature).
-- **Signature côté serveur.** `private_key` / `use_root` permettent de signer côté
-  serveur pour faciliter les essais. Un déploiement réel signerait côté client ; seule
-  la *vérification* compte pour le consensus, et elle reste stricte.
-- **Idempotence applicative.** Deux transactions d'intention identique mais signées
-  séparément (donc de signatures différentes) restent deux opérations distinctes. Pour
-  une vraie protection « une seule fois », fournir un `nonce` stable par opération.
-- **Réseau best-effort.** La diffusion aux pairs est synchrone et tolérante aux pannes ;
-  la cohérence est rétablie à la demande via `/nodes/resolve` (plus longue chaîne valide),
-  pas par un protocole de consensus temps réel.
-- **Persistance partielle.** La **chaîne** est persistée sur disque (fichier `.ylia`),
-  donc un nœud relancé repart de son dernier état. En revanche, le **mempool**
-  (transactions en attente) et la **liste des pairs** restent en mémoire : ils sont perdus
-  au redémarrage (les pairs se réenregistrent via `/nodes/register`, le mempool se
-  reconstitue par diffusion ou nouvelles soumissions).
+**Étapes**
 
+1. Démarrer deux nœuds locaux, ports `5000` et `5001`.
+2. Sur le nœud `5000`, enregistrer `5001` comme pair.
+3. Sur le nœud `5001`, miner un bloc.
+4. Sur le nœud `5000`, miner deux blocs.
+5. Depuis le nœud `5001`, lancer la résolution : `GET /nodes/resolve`.
 
-## Tests fonctionnels de la blockchain
+**Résultat attendu** : ✅ le nœud `5001` adopte la chaîne du nœud `5000`, celle-ci étant plus longue et valide.
 
-## 1. Création d'un bloc
+### 5. Envoi d'un bloc à un pair (bloc valide ou corrompu)
 
-### Étapes
+**Étapes**
 
-1. Se connecter avec un compte disposant du rôle **Responsable**.
-2. Effectuer l'autorisation du responsable.
-3. Ajouter une ou plusieurs transactions.
-4. Lancer le processus de minage.
+1. Démarrer deux nœuds locaux, ports `5000` et `5001`, et enregistrer `5001` comme pair de `5000`.
+2. Sur le nœud `5000`, miner un nouveau bloc et récupérer son JSON (`GET /chain`, dernier élément).
+3. Transmettre ce bloc au pair :
 
-### Résultat attendu
+   ```bash
+   curl -X POST http://127.0.0.1:5001/blocks/receive \
+     -H 'Content-Type: application/json' \
+     -d '<bloc JSON>'
+   ```
 
-✅ Un nouveau bloc est créé et ajouté à la chaîne.
+**Résultats attendus**
 
----
+- **Chaînes divergentes** : ❌ si le bloc ne prolonge pas la tête de chaîne du nœud `5001` (ou que son hash/signature a été altéré), la requête renvoie `409` avec `{"accepted": false, "reason": "..."}`.
+- **Chaînes synchronisées** : ✅ si le bloc prolonge correctement la tête de chaîne du nœud `5001` (par ex. après une résolution de conflits réussie), il est accepté (`201`, `{"accepted": true, ...}`).
 
-## 2. Vérification de la détection d'erreurs
+## Variables d'environnement
 
-### Étapes
-
-1. Créer un nouveau bloc (voir scénario n°1).
-2. Injecter une erreur dans un bloc dont l'index est supérieur à `0` (par exemple `1`, `2`, etc.).
-3. Ajouter une transaction frauduleuse telle que :
-
-```json
-{
-  "sender": "attacker",
-  "recipient": "pizzha.se",
-  "amount": 9999
-}
-```
-
-### Résultat attendu
-
-✅ Le système détecte l'altération et signale le bloc concerné (par exemple le bloc d'index `2`) comme invalide en l'entourant en rouge et indiquant le message.
-
----
-
-## 3. Résolution de conflits – Cas n°1
-
-### Étapes
-
-1. Démarrer deux nœuds sur les ports `5000` et `5001`.
-2. Sur le nœud `5000`, ajouter `5001` à la liste des pairs (*peers*).
-3. Sur le nœud `5000`, créer un nouveau bloc.
-4. Sur le nœud `5001`, créer deux nouveaux blocs.
-5. Depuis le nœud `5001`, lancer la résolution des conflits.
-
-### Résultat attendu
-
-✅ La chaîne actuelle du nœud `5001` est conservée, car elle est la plus longue.
-
----
-
-## 4. Résolution de conflits – Cas n°2
-
-### Étapes
-
-1. Démarrer deux nœuds sur les ports `5000` et `5001`.
-2. Sur le nœud `5000`, ajouter `5001` à la liste des pairs (*peers*).
-3. Sur le nœud `5001`, créer un bloc.
-4. Sur le nœud `5000`, créer deux blocs.
-5. Depuis le nœud `5001`, lancer la résolution des conflits.
-
-### Résultat attendu
-
-✅ Le nœud `5001` récupère et adopte la chaîne du nœud `5000`, celle-ci étant plus longue.
-
----
-
-## 5. Envoi d'un bloc aux pairs (bloc valide ou corrompu)
-
-### Étapes
-
-1. Démarrer deux nœuds sur les ports `5000` et `5001`.
-2. Sur le nœud `5000`, ajouter `5001` à la liste des pairs (*peers*).
-3. Sur le nœud `5000`, créer un nouveau bloc.
-4. Saisir l'index du bloc à transmettre (par exemple `2`, l'index `1` pouvant correspondre à l'autorisation du responsable).
-5. Cliquer sur **« Envoyer le bloc »**.
-
-### Résultats attendus
-
-#### Cas 1 : chaînes divergentes
-
-❌ Si le bloc de tête du pair destinataire est différent, le transfert est rejeté et une erreur est signalée.
-
-#### Cas 2 : chaînes synchronisées
-
-✅ Si les blocs de tête sont identiques (par exemple après une résolution de conflit réussie), le bloc est accepté et intégré correctement.
-
-
+| Variable | Description |
+|---|---|
+| `YLIA_PORT` / `PORT` | Port d'écoute du nœud. |
+| `YLIA_NODE_KEY` / `NODE_KEY` | Clé privée explicite de l'identité du nœud. Absente → identité persistée/générée automatiquement. |
+| `YLIA_ROOT_KEY` | Clé privée de l'autorité racine (par défaut : clé déterministe `0x01`, à changer en production). |
+| `YLIA_DEMO_KEYS` | JSON `{role: clé_privée}` pour des identités de démo partagées entre tous les nœuds. |
+| `YLIA_DATA_DIR` | Répertoire de persistance (par défaut `data`). |
+| `YLIA_CHAIN_FILE` / `YLIA_KEY_FILE` | Force un chemin explicite pour la chaîne / la clé du nœud. |
+| `YLIA_PEER_TIMEOUT` | Timeout (secondes) des appels réseau entre pairs (par défaut `3.0`). |
+| `NODE_C_KEY` | Clé privée fixe utilisée par `node_c` dans `docker-compose.yaml`. |

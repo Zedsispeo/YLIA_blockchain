@@ -1,6 +1,5 @@
-services:
-
-  # node_a : autorité RACINE (bootstrap). C'est la seule autorité au genesis :
+version: '3.8'
+services:  # node_a : autorité RACINE (bootstrap). C'est la seule autorité au genesis :
   # elle peut miner et agréer les autres établissements. NODE_KEY = clé racine.
   node_a:
     build: .
@@ -11,6 +10,8 @@ services:
       - "5000:5000"
     volumes:
       - ./data/node_a:/app/data
+    env_file:
+      - .env
 
   # node_b : aucune clé fournie → génère sa PROPRE identité au 1er démarrage et
   # la persiste dans son volume (data/node_b/ylia-5001.key). Elle est rechargée
@@ -23,6 +24,8 @@ services:
       - "5001:5001"
     volumes:
       - ./data/node_b:/app/data
+    env_file:
+      - .env
 
   # node_c : identité d'établissement explicite, fournie via .env (NODE_C_KEY).
   node_c:
@@ -34,4 +37,6 @@ services:
       - "5002:5002"
     volumes:
       - ./data/node_c:/app/data
+    env_file:
+      - .env
 
